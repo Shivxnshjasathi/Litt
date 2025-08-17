@@ -67,7 +67,7 @@ To run this project locally, follow these steps:
 
 1.  **Clone the repository:**
     ```bash
-    git clone [https://github.com/your-username/lilt-music-app.git](https://github.com/your-username/lilt-music-app.git)
+    git clone [[https://github.com/your-username/lilt-music-app.git](https://github.com/your-username/lilt-music-app.git](https://github.com/Shivxnshjasathi/Litt.git))
     ```
 2.  **Open in Android Studio:**
     * Open Android Studio (Hedgehog or newer is recommended).
