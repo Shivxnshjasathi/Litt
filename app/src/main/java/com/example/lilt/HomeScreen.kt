@@ -5,9 +5,19 @@ package com.example.lilt
 import android.app.Application
 import android.net.Uri
 import androidx.activity.compose.BackHandler
+// ANIMATION: Import necessary animation components
+import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.animateContentSize
+import androidx.compose.animation.core.tween
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.scaleIn
+import androidx.compose.animation.scaleOut
+import androidx.compose.animation.slideInHorizontally
 import androidx.compose.animation.slideInVertically
 import androidx.compose.animation.slideOutVertically
+import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -49,6 +59,7 @@ import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -176,7 +187,8 @@ class EnergyRepository(
         val dtoList = api.getPlayouts()
         val songs = dtoList.mapNotNull { dto ->
             val title = dto.title?.ifBlank { null } ?: return@mapNotNull null
-            val artist = dto.artist?.ifBlank { null } ?: "Unknown"
+            // EDIT: If the artist is blank or null, we now return null, which causes mapNotNull to filter this song out.
+            val artist = dto.artist?.ifBlank { null } ?: return@mapNotNull null
             val image = dto.imageUrl ?: "https://placehold.co/160x160?text=M"
             val audio = dto.audioUrl ?: return@mapNotNull null
             val playTime = try {
@@ -386,16 +398,20 @@ class EnergyViewModel(app: Application) : AndroidViewModel(app) {
 @Composable
 fun HeaderImageWithGradient(imageUrl: String?) {
     Box(modifier = Modifier.height(300.dp)) {
-        Image(
-            painter = rememberAsyncImagePainter(
-                model = imageUrl,
-                //error = painterResource(id = R.drawable.landingscreenbg),
-                // placeholder = painterResource(id = R.drawable.landingscreenbg)
-            ),
-            contentDescription = "Header background",
-            modifier = Modifier.fillMaxSize(),
-            contentScale = ContentScale.Crop
-        )
+        AnimatedContent(
+            targetState = imageUrl,
+            transitionSpec = { fadeIn(animationSpec = tween(600)) togetherWith fadeOut(animationSpec = tween(600)) },
+            label = "HeaderImageAnimation"
+        ) { targetImageUrl ->
+            Image(
+                painter = rememberAsyncImagePainter(
+                    model = targetImageUrl,
+                ),
+                contentDescription = "Header background",
+                modifier = Modifier.fillMaxSize(),
+                contentScale = ContentScale.Crop
+            )
+        }
         Box(
             modifier = Modifier
                 .fillMaxSize()
@@ -419,11 +435,15 @@ fun EnergyPlayerScreen(modifier: Modifier = Modifier) {
             .create(EnergyViewModel::class.java)
     }
 
+    var isContentLoaded by remember { mutableStateOf(false) }
+    LaunchedEffect(vm.songs) {
+        isContentLoaded = vm.songs.isNotEmpty()
+    }
+
     BackHandler(enabled = vm.showPlayer) { vm.closePlayer() }
 
     Surface(color = MaterialTheme.colorScheme.background, modifier = modifier.fillMaxSize()) {
         Box(modifier = Modifier.fillMaxSize()) {
-            // Get the image URL from the first song, or null if the list is empty
             val headerImageUrl = vm.songs.firstOrNull()?.imageUrl
             HeaderImageWithGradient(imageUrl = headerImageUrl)
 
@@ -431,72 +451,95 @@ fun EnergyPlayerScreen(modifier: Modifier = Modifier) {
                 vm.error != null -> ErrorState(vm.error!!, onRetry = { vm.fetchSongs(forceReload = true) })
                 vm.loading && vm.songs.isEmpty() -> LoadingState()
                 else -> {
-                    Column(
-                        modifier = Modifier
-                            .fillMaxSize()
-                            .verticalScroll(rememberScrollState())
-                            .padding(bottom = if (vm.selectedSong != null) 80.dp else 16.dp)
+                    AnimatedVisibility(
+                        visible = !vm.loading || vm.songs.isNotEmpty(),
+                        enter = fadeIn() + slideInVertically(initialOffsetY = { it / 10 }),
+                        modifier = Modifier.fillMaxSize()
                     ) {
-                        Spacer(modifier = Modifier.height(220.dp)) // Pushes content below header
-                        Text(
-                            text = "Picked For You",
-                            style = AppTypography.bodyLarge,
-                            fontWeight = FontWeight.Bold,
-                            color = MaterialTheme.colorScheme.secondary,
-                            modifier = Modifier.padding(16.dp)
-                        )
-
-                        if (vm.randomSongs.isNotEmpty()) {
-                            FeaturedSongs(
-                                songs = vm.randomSongs,
-                                onSongClick = vm::onSongClick
+                        Column(
+                            modifier = Modifier
+                                .fillMaxSize()
+                                .verticalScroll(rememberScrollState())
+                                .padding(bottom = if (vm.selectedSong != null) 80.dp else 16.dp)
+                        ) {
+                            Spacer(modifier = Modifier.height(220.dp))
+                            Text(
+                                text = "Picked For You",
+                                style = AppTypography.bodyLarge,
+                                fontWeight = FontWeight.Bold,
+                                color = MaterialTheme.colorScheme.secondary,
+                                modifier = Modifier.padding(16.dp)
                             )
-                        }
 
-                        Spacer(Modifier.height(36.dp))
-                        Text(
-                            text = "Popular Suggestions",
-                            style = AppTypography.bodyLarge,
-                            fontWeight = FontWeight.Bold,
-                            color = MaterialTheme.colorScheme.secondary,
-                            modifier = Modifier.padding(horizontal = 16.dp)
-                        )
-                        Spacer(Modifier.height(8.dp))
+                            if (vm.randomSongs.isNotEmpty()) {
+                                FeaturedSongs(
+                                    songs = vm.randomSongs,
+                                    onSongClick = vm::onSongClick
+                                )
+                            }
 
-                        vm.songs.forEach { song ->
-                            SongRow(
-                                song = song,
-                                onSongClick = { vm.onSongClick(song) },
+                            Spacer(Modifier.height(36.dp))
+                            Text(
+                                text = "Popular Suggestions",
+                                style = AppTypography.bodyLarge,
+                                fontWeight = FontWeight.Bold,
+                                color = MaterialTheme.colorScheme.secondary,
                                 modifier = Modifier.padding(horizontal = 16.dp)
                             )
+                            Spacer(Modifier.height(8.dp))
+
+                            vm.songs.forEachIndexed { index, song ->
+                                AnimatedVisibility(
+                                    visible = isContentLoaded,
+                                    enter = fadeIn(animationSpec = tween(delayMillis = index * 50)) +
+                                            slideInHorizontally(animationSpec = tween(delayMillis = index * 50))
+                                ) {
+                                    SongRow(
+                                        song = song,
+                                        onSongClick = { vm.onSongClick(song) },
+                                        modifier = Modifier.padding(horizontal = 16.dp)
+                                    )
+                                }
+                            }
                         }
                     }
                 }
             }
 
-            FloatingActionButton(
-                onClick = { vm.fetchSongs(forceReload = true) },
-                containerColor = MaterialTheme.colorScheme.primary,
+            AnimatedVisibility(
+                visible = !vm.loading && vm.error == null,
+                enter = scaleIn(),
+                exit = scaleOut(),
                 modifier = Modifier
                     .align(Alignment.BottomEnd)
                     .padding(16.dp)
             ) {
-                Icon(
-                    Icons.Default.Refresh,
-                    contentDescription = "Reload",
-                    tint = MaterialTheme.colorScheme.onPrimary
-                )
+                FloatingActionButton(
+                    onClick = { vm.fetchSongs(forceReload = true) },
+                    containerColor = MaterialTheme.colorScheme.primary,
+                ) {
+                    Icon(
+                        Icons.Default.Refresh,
+                        contentDescription = "Reload",
+                        tint = MaterialTheme.colorScheme.onPrimary
+                    )
+                }
             }
 
-            if (vm.selectedSong != null) {
+            AnimatedVisibility(
+                visible = vm.selectedSong != null,
+                enter = slideInVertically(initialOffsetY = { it }),
+                exit = slideOutVertically(targetOffsetY = { it }),
+                modifier = Modifier.align(Alignment.BottomCenter)
+            ) {
                 MiniPlayer(
                     song = vm.selectedSong!!,
                     isPlaying = vm.isPlaying,
                     onPlayPause = vm::playPause,
-                    onTap = vm::openFullScreenPlayer,
-                    modifier = Modifier.align(Alignment.BottomCenter)
+                    onTap = vm::openFullScreenPlayer
                 )
             }
+
 
             AnimatedVisibility(
                 visible = vm.showPlayer && vm.selectedSong != null,
@@ -555,16 +598,20 @@ fun FeaturedSongs(
         contentPadding = PaddingValues(horizontal = 16.dp),
         horizontalArrangement = Arrangement.spacedBy(16.dp)
     ) {
-        items(songs) { song ->
-            FeaturedSongCard(song = song, onSongClick = { onSongClick(song) })
+        items(songs, key = { it.audioUrl }) { song ->
+            FeaturedSongCard(
+                song = song,
+                onSongClick = { onSongClick(song) },
+                modifier = Modifier.animateItem(fadeInSpec = null, fadeOutSpec = null)
+            )
         }
     }
 }
 
 @Composable
-fun FeaturedSongCard(song: Song, onSongClick: () -> Unit) {
+fun FeaturedSongCard(song: Song, onSongClick: () -> Unit, modifier: Modifier = Modifier) {
     Column(
-        modifier = Modifier
+        modifier = modifier
             .width(140.dp)
             .clickable(onClick = onSongClick)
     ) {
@@ -608,6 +655,7 @@ fun SongRow(
             .clip(RoundedCornerShape(8.dp))
             .clickable(onClick = onSongClick)
             .padding(vertical = 8.dp)
+            .animateContentSize()
     ) {
         Image(
             painter = rememberAsyncImagePainter(song.imageUrl),
@@ -664,30 +712,44 @@ fun MiniPlayer(
             .clip(RoundedCornerShape(12.dp))
             .clickable(onClick = onTap)
     ) {
-        Row(
-            verticalAlignment = Alignment.CenterVertically,
-            modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp)
-        ) {
-            Image(
-                painter = rememberAsyncImagePainter(song.imageUrl),
-                contentDescription = "Album Art",
-                contentScale = ContentScale.Crop,
-                modifier = Modifier
-                    .size(48.dp)
-                    .clip(RoundedCornerShape(8.dp))
-            )
-            Spacer(Modifier.width(12.dp))
-            Column(modifier = Modifier.weight(1f)) {
-                Text(song.title, color = MaterialTheme.colorScheme.secondary, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                Text(song.artist, color = TextSecondary, fontSize = 12.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
-            }
-            IconButton(onClick = onPlayPause) {
-                Icon(
-                    imageVector = if (isPlaying) Icons.Default.Pause else Icons.Default.PlayArrow,
-                    contentDescription = "Play/Pause",
-                    tint = MaterialTheme.colorScheme.secondary,
-                    modifier = Modifier.size(32.dp)
+        AnimatedContent(
+            targetState = song,
+            transitionSpec = {
+                fadeIn(animationSpec = tween(300)) togetherWith fadeOut(animationSpec = tween(300))
+            },
+            label = "MiniPlayerContentAnimation",
+        ) { targetSong ->
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp)
+            ) {
+                Image(
+                    painter = rememberAsyncImagePainter(targetSong.imageUrl),
+                    contentDescription = "Album Art",
+                    contentScale = ContentScale.Crop,
+                    modifier = Modifier
+                        .size(48.dp)
+                        .clip(RoundedCornerShape(8.dp))
                 )
+                Spacer(Modifier.width(12.dp))
+                Column(modifier = Modifier.weight(1f)) {
+                    Text(targetSong.title, color = MaterialTheme.colorScheme.secondary, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                    Text(targetSong.artist, color = TextSecondary, fontSize = 12.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                }
+                IconButton(onClick = onPlayPause) {
+                    AnimatedContent(
+                        targetState = isPlaying,
+                        transitionSpec = { scaleIn() togetherWith scaleOut() },
+                        label = "PlayPauseIconAnimation"
+                    ) { playing ->
+                        Icon(
+                            imageVector = if (playing) Icons.Default.Pause else Icons.Default.PlayArrow,
+                            contentDescription = "Play/Pause",
+                            tint = MaterialTheme.colorScheme.secondary,
+                            modifier = Modifier.size(32.dp)
+                        )
+                    }
+                }
             }
         }
     }
@@ -711,6 +773,12 @@ fun FullScreenPlayer(
     summary: String?,
     isSummaryLoading: Boolean
 ) {
+    var contentVisible by remember { mutableStateOf(false) }
+    LaunchedEffect(Unit) {
+        delay(150)
+        contentVisible = true
+    }
+
     Surface(
         color = MaterialTheme.colorScheme.background,
         modifier = Modifier.fillMaxSize()
@@ -729,134 +797,171 @@ fun FullScreenPlayer(
 
             Spacer(Modifier.height(16.dp))
 
-            Box(
-                modifier = Modifier
-                    .fillMaxWidth(0.85f)
-                    .aspectRatio(1f) // Ensures the Box is always a square
-                    .clip(RoundedCornerShape(16.dp))
-                    .background(CardBackground) // Placeholder background
-            ) {
-                Image(
-                    painter = rememberAsyncImagePainter(song.imageUrl),
-                    contentDescription = "Album Art",
-                    contentScale = ContentScale.Crop,
-                    modifier = Modifier.fillMaxSize() // Image fills the square Box
-                )
-            }
-
-            Spacer(Modifier.height(24.dp))
-
-            Text(
-                song.title,
-                fontSize = 24.sp,
-                fontWeight = FontWeight.Bold,
-                color = MaterialTheme.colorScheme.secondary,
-                textAlign = TextAlign.Center,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis
-            )
-            Spacer(Modifier.height(4.dp))
-            Text(
-                song.artist,
-                fontSize = 18.sp,
-                color = TextSecondary,
-                textAlign = TextAlign.Center,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis
-            )
-
-            // --- SONG SUMMARY SECTION ---
-            Spacer(Modifier.height(16.dp))
-            Box(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .weight(1f), // Allow this box to take up remaining space
-                contentAlignment = Alignment.Center
+            AnimatedVisibility(
+                visible = contentVisible,
+                enter = fadeIn(tween(durationMillis = 500, delayMillis = 100)) +
+                        slideInVertically(tween(durationMillis = 500, delayMillis = 100), initialOffsetY = { it / 4 })
             ) {
                 Box(
                     modifier = Modifier
-                        .fillMaxSize()
-                        .clip(RoundedCornerShape(12.dp))
-                        .background(CardBackground.copy(alpha = 0.5f))
-                        .padding(12.dp),
+                        .fillMaxWidth(0.85f)
+                        .aspectRatio(1f)
+                        .clip(RoundedCornerShape(16.dp))
+                        .background(CardBackground)
+                ) {
+                    AnimatedContent(
+                        targetState = song.imageUrl,
+                        label = "FullScreenArtAnimation"
+                    ) { imageUrl ->
+                        Image(
+                            painter = rememberAsyncImagePainter(imageUrl),
+                            contentDescription = "Album Art",
+                            contentScale = ContentScale.Crop,
+                            modifier = Modifier.fillMaxSize()
+                        )
+                    }
+                }
+            }
+
+
+            Spacer(Modifier.height(24.dp))
+
+            AnimatedVisibility(
+                visible = contentVisible,
+                enter = fadeIn(tween(durationMillis = 500, delayMillis = 200)) +
+                        slideInVertically(tween(durationMillis = 500, delayMillis = 200), initialOffsetY = { it / 3 })
+            ) {
+                Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                    Text(
+                        song.title,
+                        fontSize = 24.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = MaterialTheme.colorScheme.secondary,
+                        textAlign = TextAlign.Center,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                    Spacer(Modifier.height(4.dp))
+                    Text(
+                        song.artist,
+                        fontSize = 18.sp,
+                        color = TextSecondary,
+                        textAlign = TextAlign.Center,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                }
+            }
+
+            Spacer(Modifier.height(16.dp))
+            AnimatedVisibility(
+                visible = contentVisible,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .weight(1f),
+                enter = fadeIn(tween(durationMillis = 500, delayMillis = 300)) +
+                        slideInVertically(tween(durationMillis = 500, delayMillis = 300), initialOffsetY = { it / 2 })
+            ) {
+                Box(
                     contentAlignment = Alignment.Center
                 ) {
-                    when {
-                        isSummaryLoading -> {
-                            CircularProgressIndicator(
-                                modifier = Modifier.size(32.dp),
-                                color = MaterialTheme.colorScheme.primary,
-                                strokeWidth = 3.dp
-                            )
-                        }
-                        !summary.isNullOrBlank() -> {
-                            Text(
-                                text = summary,
-                                color = TextSecondary,
-                                fontSize = 14.sp,
-                                textAlign = TextAlign.Justify,
-                                modifier = Modifier
-                                    .fillMaxSize()
-                                    .verticalScroll(rememberScrollState())
-                            )
-                        }
-                        else -> {
-                            // Empty state if API call fails or returns nothing
-                            Text(
-                                text = "No summary available.",
-                                color = TextSecondary.copy(alpha = 0.7f),
-                                fontSize = 14.sp,
-                                textAlign = TextAlign.Center
-                            )
+                    Box(
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .clip(RoundedCornerShape(12.dp))
+                            .background(CardBackground.copy(alpha = 0.5f))
+                            .padding(12.dp),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        AnimatedContent(
+                            targetState = isSummaryLoading,
+                            label = "SummaryContentAnimation"
+                        ) { loading ->
+                            if (loading) {
+                                CircularProgressIndicator(
+                                    modifier = Modifier.size(32.dp),
+                                    color = MaterialTheme.colorScheme.primary,
+                                    strokeWidth = 3.dp
+                                )
+                            } else if (!summary.isNullOrBlank()) {
+                                Text(
+                                    text = summary,
+                                    color = TextSecondary,
+                                    fontSize = 14.sp,
+                                    textAlign = TextAlign.Justify,
+                                    modifier = Modifier
+                                        .fillMaxSize()
+                                        .verticalScroll(rememberScrollState())
+                                )
+                            } else {
+                                Text(
+                                    text = "No summary available.",
+                                    color = TextSecondary.copy(alpha = 0.7f),
+                                    fontSize = 14.sp,
+                                    textAlign = TextAlign.Center
+                                )
+                            }
                         }
                     }
                 }
             }
-            // --- END SUMMARY SECTION ---
 
             Spacer(Modifier.height(16.dp))
 
-            val progress = if (totalDuration > 0) currentPosition.toFloat() / totalDuration.toFloat() else 0f
-            LinearProgressIndicator(
-                progress = { progress },
-                modifier = Modifier.fillMaxWidth(),
-                color = MaterialTheme.colorScheme.primary,
-                trackColor = CardBackground
-            )
-            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                Text(formatTime(currentPosition), color = TextSecondary, fontSize = 12.sp)
-                Text(formatTime(totalDuration), color = TextSecondary, fontSize = 12.sp)
-            }
-
-            Spacer(Modifier.height(24.dp))
-
-            Row(
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.SpaceAround,
-                modifier = Modifier.fillMaxWidth()
+            AnimatedVisibility(
+                visible = contentVisible,
+                enter = fadeIn(tween(durationMillis = 500, delayMillis = 400)) +
+                        slideInVertically(tween(durationMillis = 500, delayMillis = 400), initialOffsetY = { it / 2 })
             ) {
-
-                IconButton(onClick = { /*TODO: Previous*/ }) {
-                    Icon(Icons.Default.SkipPrevious, contentDescription = "Previous", tint = MaterialTheme.colorScheme.secondary, modifier = Modifier.size(40.dp))
-                }
-                IconButton(
-                    onClick = onPlayPause,
-                    modifier = Modifier
-                        .size(72.dp)
-                        .clip(CircleShape)
-                        .background(MaterialTheme.colorScheme.primary)
-                ) {
-                    Icon(
-                        if (isPlaying) Icons.Default.Pause else Icons.Default.PlayArrow,
-                        contentDescription = "Play/Pause",
-                        tint = MaterialTheme.colorScheme.background,
-                        modifier = Modifier.size(48.dp)
+                Column {
+                    val progress = if (totalDuration > 0) currentPosition.toFloat() / totalDuration.toFloat() else 0f
+                    LinearProgressIndicator(
+                        progress = { progress },
+                        modifier = Modifier.fillMaxWidth(),
+                        color = MaterialTheme.colorScheme.primary,
+                        trackColor = CardBackground
                     )
-                }
-                IconButton(onClick = { /*TODO: Next*/ }) {
-                    Icon(Icons.Default.SkipNext, contentDescription = "Next", tint = MaterialTheme.colorScheme.secondary, modifier = Modifier.size(40.dp))
-                }
+                    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                        Text(formatTime(currentPosition), color = TextSecondary, fontSize = 12.sp)
+                        Text(formatTime(totalDuration), color = TextSecondary, fontSize = 12.sp)
+                    }
 
+                    Spacer(Modifier.height(24.dp))
+
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.SpaceAround,
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+
+                        IconButton(onClick = { /*TODO: Previous*/ }) {
+                            Icon(Icons.Default.SkipPrevious, contentDescription = "Previous", tint = MaterialTheme.colorScheme.secondary, modifier = Modifier.size(40.dp))
+                        }
+                        IconButton(
+                            onClick = onPlayPause,
+                            modifier = Modifier
+                                .size(72.dp)
+                                .clip(CircleShape)
+                                .background(MaterialTheme.colorScheme.primary)
+                        ) {
+                            AnimatedContent(
+                                targetState = isPlaying,
+                                transitionSpec = { scaleIn() togetherWith scaleOut() },
+                                label = "FullScreenPlayPauseIconAnimation"
+                            ) { playing ->
+                                Icon(
+                                    if (playing) Icons.Default.Pause else Icons.Default.PlayArrow,
+                                    contentDescription = "Play/Pause",
+                                    tint = MaterialTheme.colorScheme.background,
+                                    modifier = Modifier.size(48.dp)
+                                )
+                            }
+                        }
+                        IconButton(onClick = { /*TODO: Next*/ }) {
+                            Icon(Icons.Default.SkipNext, contentDescription = "Next", tint = MaterialTheme.colorScheme.secondary, modifier = Modifier.size(40.dp))
+                        }
+                    }
+                }
             }
         }
     }
