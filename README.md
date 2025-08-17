@@ -28,11 +28,15 @@
 
 | Splash Screen                                               | Home Screen (Collapsing Toolbar)                                |
 | ----------------------------------------------------------- | --------------------------------------------------------------- |
-| ![Splash Screen](https://placehold.co/300x600/000000/FFFFFF?text=Splash+Screen) | ![Home Screen](https://placehold.co/300x600/000000/FFFFFF?text=Home+Screen) |
+| ![Splash Screen](<img width="1080" height="2400" alt="Screenshot_20250818_010927" src="https://github.com/user-attachments/assets/bbb62862-493d-4d38-a57c-1b8b83574bf8" />
+) | ![Home Screen](<img width="1080" height="2400" alt="Screenshot_20250818_011017" src="https://github.com/user-attachments/assets/64dbbc45-30bd-4779-b780-c26c11614e1b" />
+) |
 
 | Full-Screen Player (Dynamic BG)                             | Featured Songs Carousel                                         |
 | ----------------------------------------------------------- | --------------------------------------------------------------- |
-| ![Full Screen Player](https://placehold.co/300x600/C33764/FFFFFF?text=Player) | ![Carousel](https://placehold.co/300x600/000000/FFFFFF?text=Carousel) |
+| ![Full Screen Player](<img width="1080" height="2400" alt="Screenshot_20250818_011040" src="https://github.com/user-attachments/assets/966c5205-07dc-45b1-aa4c-868e0704e9c9" />
+) | ![Carousel](<img width="1080" height="2400" alt="Screenshot_20250818_011002" src="https://github.com/user-attachments/assets/41e73951-130a-45ac-bfc2-822edd76d74c" />
+) |
 
 ---
 
