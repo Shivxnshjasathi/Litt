@@ -3,9 +3,10 @@
 package com.example.lilt
 
 import android.app.Application
+import android.content.Context
+import android.graphics.drawable.BitmapDrawable
 import android.net.Uri
 import androidx.activity.compose.BackHandler
-// ANIMATION: Import necessary animation components
 import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.animateContentSize
@@ -21,6 +22,7 @@ import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -31,21 +33,26 @@ import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.lazy.LazyRow
-import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.itemsIndexed
+import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.foundation.pager.HorizontalPager
+import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.ArrowBack
 import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.Pause
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Refresh
+import androidx.compose.material.icons.filled.Repeat
+import androidx.compose.material.icons.filled.Shuffle
 import androidx.compose.material.icons.filled.SkipNext
 import androidx.compose.material.icons.filled.SkipPrevious
 import androidx.compose.material3.CircularProgressIndicator
@@ -53,28 +60,34 @@ import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FloatingActionButton
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
-import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
+import androidx.compose.material3.Slider
+import androidx.compose.material3.SliderDefaults
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.drawWithContent
+import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.AndroidViewModel
@@ -84,7 +97,10 @@ import androidx.media3.common.MediaItem
 import androidx.media3.common.Player
 import androidx.media3.common.util.UnstableApi
 import androidx.media3.exoplayer.ExoPlayer
+import androidx.palette.graphics.Palette
+import coil.Coil
 import coil.compose.rememberAsyncImagePainter
+import coil.request.ImageRequest
 import com.example.lilt.ui.theme.AppTypography
 import com.jakewharton.retrofit2.converter.kotlinx.serialization.asConverterFactory
 import kotlinx.coroutines.Dispatchers
@@ -104,6 +120,7 @@ import retrofit2.http.GET
 import java.net.URLEncoder
 import java.text.SimpleDateFormat
 import java.util.Locale
+import kotlin.math.roundToInt
 
 // --- THEME COLORS & MODELS ---
 
@@ -176,7 +193,6 @@ class EnergyRepository(
         SimpleDateFormat("HH:mm", Locale.getDefault())
     }
 
-    // Client for the summary API
     private val summaryClient = OkHttpClient()
 
     suspend fun fetchSongs(forceReload: Boolean = false): List<Song> {
@@ -187,7 +203,6 @@ class EnergyRepository(
         val dtoList = api.getPlayouts()
         val songs = dtoList.mapNotNull { dto ->
             val title = dto.title?.ifBlank { null } ?: return@mapNotNull null
-            // EDIT: If the artist is blank or null, we now return null, which causes mapNotNull to filter this song out.
             val artist = dto.artist?.ifBlank { null } ?: return@mapNotNull null
             val image = dto.imageUrl ?: "https://placehold.co/160x160?text=M"
             val audio = dto.audioUrl ?: return@mapNotNull null
@@ -206,7 +221,6 @@ class EnergyRepository(
     }
 
     suspend fun fetchSongSummary(song: Song): String {
-        // URL-encode song and artist names to handle special characters
         val songNameEncoded = URLEncoder.encode(song.title, "UTF-8")
         val artistNameEncoded = URLEncoder.encode(song.artist, "UTF-8")
 
@@ -245,6 +259,10 @@ class PlayerController(private val app: Application) {
         exo.playWhenReady = false
     }
 
+    fun seekTo(position: Long) {
+        exo.seekTo(position)
+    }
+
     fun isPlaying(): Boolean = exo.isPlaying
 
     fun release() {
@@ -264,14 +282,13 @@ class EnergyViewModel(app: Application) : AndroidViewModel(app) {
         private set
     var songs by mutableStateOf<List<Song>>(emptyList())
         private set
-    var randomSongs by mutableStateOf<List<Song>>(emptyList()) // State for featured songs
+    var randomSongs by mutableStateOf<List<Song>>(emptyList())
         private set
     var selectedSong by mutableStateOf<Song?>(null)
         private set
     var showPlayer by mutableStateOf(false)
         private set
 
-    // State for song summary
     var songSummary by mutableStateOf<String?>(null)
         private set
     var isSummaryLoading by mutableStateOf(false)
@@ -310,7 +327,6 @@ class EnergyViewModel(app: Application) : AndroidViewModel(app) {
                 error = null
                 val fetchedSongs = repo.fetchSongs(forceReload)
                 songs = fetchedSongs
-                // Shuffle the list and take 3 for the featured section
                 randomSongs = fetchedSongs.shuffled().take(5)
             } catch (t: Throwable) {
                 error = t.message ?: "Unknown error"
@@ -333,16 +349,20 @@ class EnergyViewModel(app: Application) : AndroidViewModel(app) {
     private fun fetchSongSummary(song: Song) {
         viewModelScope.launch {
             isSummaryLoading = true
-            songSummary = null // Clear previous summary
+            songSummary = null
             try {
                 val summary = repo.fetchSongSummary(song)
-                songSummary = summary.trim().replace("\"", "") // Clean up the response
+                songSummary = summary.trim().replace("\"", "")
             } catch (t: Throwable) {
-                songSummary = "Error loading summary." // Set an error message
+                songSummary = "Error loading summary."
             } finally {
                 isSummaryLoading = false
             }
         }
+    }
+
+    fun onSeek(position: Float) {
+        player.seekTo(position.toLong())
     }
 
     fun openFullScreenPlayer() {
@@ -354,6 +374,22 @@ class EnergyViewModel(app: Application) : AndroidViewModel(app) {
             player.pause()
         } else {
             selectedSong?.let { player.play(it.audioUrl) }
+        }
+    }
+
+    fun skipNext() {
+        val currentSong = selectedSong ?: return
+        val currentIndex = songs.indexOf(currentSong)
+        if (currentIndex != -1 && currentIndex < songs.size - 1) {
+            onSongClick(songs[currentIndex + 1])
+        }
+    }
+
+    fun skipPrevious() {
+        val currentSong = selectedSong ?: return
+        val currentIndex = songs.indexOf(currentSong)
+        if (currentIndex > 0) {
+            onSongClick(songs[currentIndex - 1])
         }
     }
 
@@ -395,36 +431,6 @@ class EnergyViewModel(app: Application) : AndroidViewModel(app) {
     }
 }
 
-@Composable
-fun HeaderImageWithGradient(imageUrl: String?) {
-    Box(modifier = Modifier.height(300.dp)) {
-        AnimatedContent(
-            targetState = imageUrl,
-            transitionSpec = { fadeIn(animationSpec = tween(600)) togetherWith fadeOut(animationSpec = tween(600)) },
-            label = "HeaderImageAnimation"
-        ) { targetImageUrl ->
-            Image(
-                painter = rememberAsyncImagePainter(
-                    model = targetImageUrl,
-                ),
-                contentDescription = "Header background",
-                modifier = Modifier.fillMaxSize(),
-                contentScale = ContentScale.Crop
-            )
-        }
-        Box(
-            modifier = Modifier
-                .fillMaxSize()
-                .background(
-                    Brush.verticalGradient(
-                        colors = listOf(Color.Transparent, MaterialTheme.colorScheme.background),
-                        startY = 300f
-                    )
-                )
-        )
-    }
-}
-
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun EnergyPlayerScreen(modifier: Modifier = Modifier) {
@@ -435,74 +441,15 @@ fun EnergyPlayerScreen(modifier: Modifier = Modifier) {
             .create(EnergyViewModel::class.java)
     }
 
-    var isContentLoaded by remember { mutableStateOf(false) }
-    LaunchedEffect(vm.songs) {
-        isContentLoaded = vm.songs.isNotEmpty()
-    }
-
     BackHandler(enabled = vm.showPlayer) { vm.closePlayer() }
 
     Surface(color = MaterialTheme.colorScheme.background, modifier = modifier.fillMaxSize()) {
         Box(modifier = Modifier.fillMaxSize()) {
-            val headerImageUrl = vm.songs.firstOrNull()?.imageUrl
-            HeaderImageWithGradient(imageUrl = headerImageUrl)
-
             when {
                 vm.error != null -> ErrorState(vm.error!!, onRetry = { vm.fetchSongs(forceReload = true) })
                 vm.loading && vm.songs.isEmpty() -> LoadingState()
                 else -> {
-                    AnimatedVisibility(
-                        visible = !vm.loading || vm.songs.isNotEmpty(),
-                        enter = fadeIn() + slideInVertically(initialOffsetY = { it / 10 }),
-                        modifier = Modifier.fillMaxSize()
-                    ) {
-                        Column(
-                            modifier = Modifier
-                                .fillMaxSize()
-                                .verticalScroll(rememberScrollState())
-                                .padding(bottom = if (vm.selectedSong != null) 80.dp else 16.dp)
-                        ) {
-                            Spacer(modifier = Modifier.height(220.dp))
-                            Text(
-                                text = "Picked For You",
-                                style = AppTypography.bodyLarge,
-                                fontWeight = FontWeight.Bold,
-                                color = MaterialTheme.colorScheme.secondary,
-                                modifier = Modifier.padding(16.dp)
-                            )
-
-                            if (vm.randomSongs.isNotEmpty()) {
-                                FeaturedSongs(
-                                    songs = vm.randomSongs,
-                                    onSongClick = vm::onSongClick
-                                )
-                            }
-
-                            Spacer(Modifier.height(36.dp))
-                            Text(
-                                text = "Popular Suggestions",
-                                style = AppTypography.bodyLarge,
-                                fontWeight = FontWeight.Bold,
-                                color = MaterialTheme.colorScheme.secondary,
-                                modifier = Modifier.padding(horizontal = 16.dp)
-                            )
-                            Spacer(Modifier.height(8.dp))
-
-                            vm.songs.forEachIndexed { index, song ->
-                                AnimatedVisibility(
-                                    visible = isContentLoaded,
-                                    enter = fadeIn(animationSpec = tween(delayMillis = index * 50)) +
-                                            slideInHorizontally(animationSpec = tween(delayMillis = index * 50))
-                                ) {
-                                    SongRow(
-                                        song = song,
-                                        onSongClick = { vm.onSongClick(song) },
-                                        modifier = Modifier.padding(horizontal = 16.dp)
-                                    )
-                                }
-                            }
-                        }
-                    }
+                    SongListWithCollapsingToolbar(vm)
                 }
             }
 
@@ -533,13 +480,13 @@ fun EnergyPlayerScreen(modifier: Modifier = Modifier) {
                 modifier = Modifier.align(Alignment.BottomCenter)
             ) {
                 MiniPlayer(
+                    vm = vm,
                     song = vm.selectedSong!!,
                     isPlaying = vm.isPlaying,
                     onPlayPause = vm::playPause,
                     onTap = vm::openFullScreenPlayer
                 )
             }
-
 
             AnimatedVisibility(
                 visible = vm.showPlayer && vm.selectedSong != null,
@@ -549,6 +496,7 @@ fun EnergyPlayerScreen(modifier: Modifier = Modifier) {
                 vm.selectedSong?.let {
                     FullScreenPlayer(
                         song = it,
+                        vm = vm,
                         isPlaying = vm.isPlaying,
                         onPlayPause = vm::playPause,
                         onClose = vm::closePlayer,
@@ -562,6 +510,105 @@ fun EnergyPlayerScreen(modifier: Modifier = Modifier) {
         }
     }
 }
+
+@Composable
+fun SongListWithCollapsingToolbar(vm: EnergyViewModel) {
+    val lazyListState = rememberLazyListState()
+
+    Box(modifier = Modifier.fillMaxSize()) {
+        LazyColumn(
+            state = lazyListState,
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(bottom = if (vm.selectedSong != null) 80.dp else 0.dp),
+            contentPadding = PaddingValues(top = 300.dp)
+        ) {
+            item {
+                Text(
+                    text = "Picked For You",
+                    style = AppTypography.bodyLarge,
+                    fontWeight = FontWeight.Bold,
+                    color = MaterialTheme.colorScheme.secondary,
+                    modifier = Modifier.padding(16.dp)
+                )
+            }
+
+            if (vm.randomSongs.isNotEmpty()) {
+                item {
+                    FeaturedSongsPager(
+                        songs = vm.randomSongs,
+                        onSongClick = vm::onSongClick
+                    )
+                }
+            }
+
+            item {
+                Spacer(Modifier.height(24.dp))
+                Text(
+                    text = "Popular Suggestions",
+                    style = AppTypography.bodyLarge,
+                    fontWeight = FontWeight.Bold,
+                    color = MaterialTheme.colorScheme.secondary,
+                    modifier = Modifier.padding(horizontal = 16.dp)
+                )
+                Spacer(Modifier.height(8.dp))
+            }
+
+            itemsIndexed(vm.songs, key = { _, song -> song.audioUrl }) { index, song ->
+                AnimatedVisibility(
+                    visible = true,
+                    enter = fadeIn(animationSpec = tween(delayMillis = index * 50)) +
+                            slideInHorizontally(animationSpec = tween(delayMillis = index * 50))
+                ) {
+                    SongRow(
+                        song = song,
+                        onSongClick = { vm.onSongClick(song) },
+                        modifier = Modifier.padding(horizontal = 16.dp)
+                    )
+                }
+            }
+        }
+
+        Box(
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(300.dp)
+                .graphicsLayer {
+                    val scrollOffset = if (lazyListState.firstVisibleItemIndex == 0) {
+                        lazyListState.firstVisibleItemScrollOffset.toFloat()
+                    } else {
+                        Float.MAX_VALUE
+                    }
+                    translationY = scrollOffset * 0.5f
+                    alpha = (1f - (scrollOffset / 600f)).coerceIn(0f, 1f)
+                }
+        ) {
+            AnimatedContent(
+                targetState = vm.songs.firstOrNull()?.imageUrl,
+                transitionSpec = { fadeIn(tween(600)) togetherWith fadeOut(tween(600)) },
+                label = "HeaderImageAnimation"
+            ) { targetImageUrl ->
+                Image(
+                    painter = rememberAsyncImagePainter(model = targetImageUrl),
+                    contentDescription = "Header background",
+                    modifier = Modifier.fillMaxSize(),
+                    contentScale = ContentScale.Crop
+                )
+            }
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .background(
+                        Brush.verticalGradient(
+                            colors = listOf(Color.Transparent, MaterialTheme.colorScheme.background),
+                            startY = 400f
+                        )
+                    )
+            )
+        }
+    }
+}
+
 
 @Composable
 fun LoadingState() {
@@ -588,31 +635,66 @@ fun ErrorState(message: String, onRetry: () -> Unit) {
 }
 
 @Composable
-fun FeaturedSongs(
+fun FeaturedSongsPager(
     songs: List<Song>,
     onSongClick: (Song) -> Unit,
     modifier: Modifier = Modifier
 ) {
-    LazyRow(
-        modifier = modifier,
-        contentPadding = PaddingValues(horizontal = 16.dp),
-        horizontalArrangement = Arrangement.spacedBy(16.dp)
+    val pagerState = rememberPagerState(
+        initialPage = if (songs.size > 1) 1 else 0,
+        pageCount = { songs.size }
+    )
+    Column(
+        modifier = modifier.fillMaxWidth(),
+        horizontalAlignment = Alignment.CenterHorizontally
     ) {
-        items(songs, key = { it.audioUrl }) { song ->
+        HorizontalPager(
+            state = pagerState,
+            contentPadding = PaddingValues(horizontal = 28.dp),
+            modifier = Modifier.fillMaxWidth()
+        ) { page ->
             FeaturedSongCard(
-                song = song,
-                onSongClick = { onSongClick(song) },
-                modifier = Modifier.animateItem(fadeInSpec = null, fadeOutSpec = null)
+                song = songs[page],
+                onSongClick = { onSongClick(songs[page]) },
+                modifier = Modifier.graphicsLayer {
+                    val pageOffset = pagerState.currentPageOffsetFraction
+                    val scale = lerp(0.85f, 1f, 1f - pageOffset.coerceIn(0f, 1f))
+                    scaleX = scale
+                    scaleY = scale
+                }
             )
         }
+        Spacer(Modifier.height(12.dp))
+        Row(
+            Modifier
+                .height(10.dp)
+                .fillMaxWidth(),
+            horizontalArrangement = Arrangement.Center
+        ) {
+            repeat(songs.size) { iteration ->
+                val color = if (pagerState.currentPage == iteration) MaterialTheme.colorScheme.primary else TextSecondary
+                Box(
+                    modifier = Modifier
+                        .padding(horizontal = 4.dp)
+                        .clip(CircleShape)
+                        .background(color)
+                        .size(8.dp)
+                )
+            }
+        }
     }
+}
+
+fun lerp(start: Float, stop: Float, fraction: Float): Float {
+    return (1 - fraction) * start + fraction * stop
 }
 
 @Composable
 fun FeaturedSongCard(song: Song, onSongClick: () -> Unit, modifier: Modifier = Modifier) {
     Column(
         modifier = modifier
-            .width(140.dp)
+            .padding(horizontal = 8.dp)
+            .width(400.dp)
             .clickable(onClick = onSongClick)
     ) {
         Image(
@@ -620,23 +702,23 @@ fun FeaturedSongCard(song: Song, onSongClick: () -> Unit, modifier: Modifier = M
             contentDescription = song.title,
             contentScale = ContentScale.Crop,
             modifier = Modifier
-                .size(140.dp)
-                .clip(RoundedCornerShape(12.dp))
+                .aspectRatio(1f)
+                .clip(RoundedCornerShape(16.dp))
         )
-        Spacer(Modifier.height(8.dp))
-        Text(
-            text = song.artist,
-            style = MaterialTheme.typography.labelSmall,
-            color = MaterialTheme.colorScheme.secondary,
-            maxLines = 1,
-            overflow = TextOverflow.Ellipsis
-        )
+        Spacer(Modifier.height(12.dp))
         Text(
             text = song.title,
             style = MaterialTheme.typography.bodyMedium,
             fontWeight = FontWeight.SemiBold,
             maxLines = 1,
             color = MaterialTheme.colorScheme.secondary,
+            overflow = TextOverflow.Ellipsis
+        )
+        Text(
+            text = song.artist,
+            style = MaterialTheme.typography.labelSmall,
+            color = TextSecondary,
+            maxLines = 1,
             overflow = TextOverflow.Ellipsis
         )
     }
@@ -698,56 +780,73 @@ fun SongRow(
 
 @Composable
 fun MiniPlayer(
+    vm: EnergyViewModel,
     song: Song,
     isPlaying: Boolean,
     onPlayPause: () -> Unit,
     onTap: () -> Unit,
     modifier: Modifier = Modifier
 ) {
+    val progress = if (vm.totalDuration > 0) vm.currentPosition.toFloat() / vm.totalDuration.toFloat() else 0f
+
     Surface(
-        color = CardBackground,
+        color = CardBackground, // Solid background color
         modifier = modifier
             .fillMaxWidth()
             .padding(8.dp)
             .clip(RoundedCornerShape(12.dp))
             .clickable(onClick = onTap)
     ) {
-        AnimatedContent(
-            targetState = song,
-            transitionSpec = {
-                fadeIn(animationSpec = tween(300)) togetherWith fadeOut(animationSpec = tween(300))
-            },
-            label = "MiniPlayerContentAnimation",
-        ) { targetSong ->
-            Row(
-                verticalAlignment = Alignment.CenterVertically,
-                modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp)
-            ) {
-                Image(
-                    painter = rememberAsyncImagePainter(targetSong.imageUrl),
-                    contentDescription = "Album Art",
-                    contentScale = ContentScale.Crop,
-                    modifier = Modifier
-                        .size(48.dp)
-                        .clip(RoundedCornerShape(8.dp))
-                )
-                Spacer(Modifier.width(12.dp))
-                Column(modifier = Modifier.weight(1f)) {
-                    Text(targetSong.title, color = MaterialTheme.colorScheme.secondary, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                    Text(targetSong.artist, color = TextSecondary, fontSize = 12.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+        Box(
+            modifier = Modifier
+                .background(CardBackground)
+                .drawWithContent {
+                    drawContent()
+                    drawLine(
+                        color = Color(0xFF27d999),
+                        start = Offset(0f, size.height),
+                        end = Offset(size.width * progress, size.height),
+                        strokeWidth = 4.dp.toPx()
+                    )
                 }
-                IconButton(onClick = onPlayPause) {
-                    AnimatedContent(
-                        targetState = isPlaying,
-                        transitionSpec = { scaleIn() togetherWith scaleOut() },
-                        label = "PlayPauseIconAnimation"
-                    ) { playing ->
-                        Icon(
-                            imageVector = if (playing) Icons.Default.Pause else Icons.Default.PlayArrow,
-                            contentDescription = "Play/Pause",
-                            tint = MaterialTheme.colorScheme.secondary,
-                            modifier = Modifier.size(32.dp)
-                        )
+        ) {
+            AnimatedContent(
+                targetState = song,
+                transitionSpec = {
+                    fadeIn(animationSpec = tween(300)) togetherWith fadeOut(animationSpec = tween(300))
+                },
+                label = "MiniPlayerContentAnimation",
+            ) { targetSong ->
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp)
+                ) {
+                    Image(
+                        painter = rememberAsyncImagePainter(targetSong.imageUrl),
+                        contentDescription = "Album Art",
+                        contentScale = ContentScale.Crop,
+                        modifier = Modifier
+                            .size(48.dp)
+                            .clip(RoundedCornerShape(8.dp))
+                    )
+                    Spacer(Modifier.width(12.dp))
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text(targetSong.title, color = MaterialTheme.colorScheme.secondary, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                        Text(targetSong.artist, color = TextSecondary, fontSize = 12.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                    }
+                    IconButton(onClick = onPlayPause) {
+                        AnimatedContent(
+                            targetState = isPlaying,
+                            transitionSpec = { scaleIn() togetherWith scaleOut() },
+                            label = "PlayPauseIconAnimation"
+                        ) { playing ->
+                            Icon(
+                                imageVector = if (playing) Icons.Default.Pause else Icons.Default.PlayArrow,
+                                contentDescription = "Play/Pause",
+                                tint = MaterialTheme.colorScheme.secondary,
+                                modifier = Modifier.size(32.dp)
+                            )
+                        }
                     }
                 }
             }
@@ -762,9 +861,36 @@ private fun formatTime(ms: Long): String {
     return String.format("%02d:%02d", minutes, seconds)
 }
 
+// Helper function to extract dominant color from an image URL
+suspend fun getDominantColor(context: Context, imageUrl: String): Color? {
+    return try {
+        val request = ImageRequest.Builder(context)
+            .data(imageUrl)
+            .allowHardware(false) // Important for Palette
+            .build()
+        val drawable = Coil.imageLoader(context).execute(request).drawable
+        val bitmap = (drawable as? BitmapDrawable)?.bitmap ?: return null
+        withContext(Dispatchers.Default) {
+            val palette = Palette.from(bitmap).generate()
+            val colorInt = palette.getVibrantColor(0)
+                .takeIf { it != 0 } ?: palette.getMutedColor(0)
+                .takeIf { it != 0 } ?: palette.getDominantColor(0)
+
+            if (colorInt != 0 && colorInt != null) {
+                Color(colorInt)
+            } else {
+                null
+            }
+        }
+    } catch (e: Exception) {
+        null // Return null on any error
+    }
+}
+
 @Composable
 fun FullScreenPlayer(
     song: Song,
+    vm: EnergyViewModel,
     isPlaying: Boolean,
     onPlayPause: () -> Unit,
     onClose: () -> Unit,
@@ -773,35 +899,65 @@ fun FullScreenPlayer(
     summary: String?,
     isSummaryLoading: Boolean
 ) {
-    var contentVisible by remember { mutableStateOf(false) }
-    LaunchedEffect(Unit) {
-        delay(150)
-        contentVisible = true
+    var offsetY by remember { mutableFloatStateOf(0f) }
+    var dominantColor by remember { mutableStateOf<Color?>(null) }
+    val context = LocalContext.current
+
+    LaunchedEffect(song.imageUrl) {
+        dominantColor = getDominantColor(context, song.imageUrl)
     }
 
-    Surface(
-        color = MaterialTheme.colorScheme.background,
-        modifier = Modifier.fillMaxSize()
+    val gradientBrush = dominantColor?.let {
+        Brush.verticalGradient(
+            colors = listOf(it, MaterialTheme.colorScheme.background)
+        )
+    } ?: Brush.verticalGradient( // Default gradient
+        colors = listOf(MaterialTheme.colorScheme.primary.copy(alpha = 0.3f), MaterialTheme.colorScheme.background)
+    )
+
+    Box(
+        modifier = Modifier
+            .fillMaxSize()
+            .background(gradientBrush)
     ) {
-        Column(
-            horizontalAlignment = Alignment.CenterHorizontally,
+        Surface(
+            color = Color.Transparent,
             modifier = Modifier
                 .fillMaxSize()
-                .padding(horizontal = 24.dp, vertical = 16.dp)
-        ) {
-            Row(Modifier.fillMaxWidth()) {
-                IconButton(onClick = onClose) {
-                    Icon(Icons.Default.ArrowBack, contentDescription = "Back", tint = MaterialTheme.colorScheme.secondary)
+                .offset { IntOffset(0, offsetY.roundToInt()) }
+                .pointerInput(Unit) {
+                    detectDragGestures(
+                        onDrag = { change, dragAmount ->
+                            change.consume()
+                            if (dragAmount.y > 0) {
+                                offsetY += dragAmount.y
+                            }
+                        },
+                        onDragEnd = {
+                            if (offsetY > 300) {
+                                onClose()
+                            }
+                            offsetY = 0f
+                        }
+                    )
                 }
-            }
-
-            Spacer(Modifier.height(16.dp))
-
-            AnimatedVisibility(
-                visible = contentVisible,
-                enter = fadeIn(tween(durationMillis = 500, delayMillis = 100)) +
-                        slideInVertically(tween(durationMillis = 500, delayMillis = 100), initialOffsetY = { it / 4 })
+        ) {
+            Column(
+                horizontalAlignment = Alignment.CenterHorizontally,
+                modifier = Modifier
+                    .fillMaxSize()
+                    .padding(horizontal = 24.dp, vertical = 16.dp)
             ) {
+                Box(
+                    modifier = Modifier
+                        .width(40.dp)
+                        .height(4.dp)
+                        .clip(CircleShape)
+                        .background(TextSecondary.copy(alpha = 0.5f))
+                )
+
+                Spacer(Modifier.height(32.dp))
+
                 Box(
                     modifier = Modifier
                         .fillMaxWidth(0.85f)
@@ -821,48 +977,33 @@ fun FullScreenPlayer(
                         )
                     }
                 }
-            }
 
+                Spacer(Modifier.height(24.dp))
 
-            Spacer(Modifier.height(24.dp))
+                Text(
+                    song.title,
+                    fontSize = 24.sp,
+                    fontWeight = FontWeight.Bold,
+                    color = MaterialTheme.colorScheme.secondary,
+                    textAlign = TextAlign.Center,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
+                )
+                Spacer(Modifier.height(4.dp))
+                Text(
+                    song.artist,
+                    fontSize = 18.sp,
+                    color = TextSecondary,
+                    textAlign = TextAlign.Center,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
+                )
 
-            AnimatedVisibility(
-                visible = contentVisible,
-                enter = fadeIn(tween(durationMillis = 500, delayMillis = 200)) +
-                        slideInVertically(tween(durationMillis = 500, delayMillis = 200), initialOffsetY = { it / 3 })
-            ) {
-                Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                    Text(
-                        song.title,
-                        fontSize = 24.sp,
-                        fontWeight = FontWeight.Bold,
-                        color = MaterialTheme.colorScheme.secondary,
-                        textAlign = TextAlign.Center,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis
-                    )
-                    Spacer(Modifier.height(4.dp))
-                    Text(
-                        song.artist,
-                        fontSize = 18.sp,
-                        color = TextSecondary,
-                        textAlign = TextAlign.Center,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis
-                    )
-                }
-            }
-
-            Spacer(Modifier.height(16.dp))
-            AnimatedVisibility(
-                visible = contentVisible,
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .weight(1f),
-                enter = fadeIn(tween(durationMillis = 500, delayMillis = 300)) +
-                        slideInVertically(tween(durationMillis = 500, delayMillis = 300), initialOffsetY = { it / 2 })
-            ) {
+                Spacer(Modifier.height(16.dp))
                 Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .weight(1f),
                     contentAlignment = Alignment.Center
                 ) {
                     Box(
@@ -904,62 +1045,63 @@ fun FullScreenPlayer(
                         }
                     }
                 }
-            }
 
-            Spacer(Modifier.height(16.dp))
+                Spacer(Modifier.height(16.dp))
 
-            AnimatedVisibility(
-                visible = contentVisible,
-                enter = fadeIn(tween(durationMillis = 500, delayMillis = 400)) +
-                        slideInVertically(tween(durationMillis = 500, delayMillis = 400), initialOffsetY = { it / 2 })
-            ) {
-                Column {
-                    val progress = if (totalDuration > 0) currentPosition.toFloat() / totalDuration.toFloat() else 0f
-                    LinearProgressIndicator(
-                        progress = { progress },
-                        modifier = Modifier.fillMaxWidth(),
-                        color = MaterialTheme.colorScheme.primary,
-                        trackColor = CardBackground
+                Slider(
+                    value = currentPosition.toFloat(),
+                    onValueChange = { vm.onSeek(it) },
+                    valueRange = 0f..totalDuration.toFloat().coerceAtLeast(1f),
+                    modifier = Modifier.fillMaxWidth(),
+                    colors = SliderDefaults.colors(
+                        thumbColor = MaterialTheme.colorScheme.primary,
+                        activeTrackColor = MaterialTheme.colorScheme.primary,
+                        inactiveTrackColor = CardBackground
                     )
-                    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                        Text(formatTime(currentPosition), color = TextSecondary, fontSize = 12.sp)
-                        Text(formatTime(totalDuration), color = TextSecondary, fontSize = 12.sp)
+                )
+                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                    Text(formatTime(currentPosition), color = TextSecondary, fontSize = 12.sp)
+                    Text(formatTime(totalDuration), color = TextSecondary, fontSize = 12.sp)
+                }
+
+                Spacer(Modifier.height(16.dp))
+
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.SpaceEvenly,
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    IconButton(onClick = { /*TODO: Shuffle*/ }) {
+                        Icon(Icons.Default.Shuffle, contentDescription = "Shuffle", tint = MaterialTheme.colorScheme.secondary)
                     }
-
-                    Spacer(Modifier.height(24.dp))
-
-                    Row(
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.SpaceAround,
-                        modifier = Modifier.fillMaxWidth()
+                    IconButton(onClick = { vm.skipPrevious() }) {
+                        Icon(Icons.Default.SkipPrevious, contentDescription = "Previous", tint = MaterialTheme.colorScheme.secondary, modifier = Modifier.size(40.dp))
+                    }
+                    IconButton(
+                        onClick = onPlayPause,
+                        modifier = Modifier
+                            .size(72.dp)
+                            .clip(CircleShape)
+                            .background(MaterialTheme.colorScheme.primary)
                     ) {
-
-                        IconButton(onClick = { /*TODO: Previous*/ }) {
-                            Icon(Icons.Default.SkipPrevious, contentDescription = "Previous", tint = MaterialTheme.colorScheme.secondary, modifier = Modifier.size(40.dp))
+                        AnimatedContent(
+                            targetState = isPlaying,
+                            transitionSpec = { scaleIn() togetherWith scaleOut() },
+                            label = "FullScreenPlayPauseIconAnimation"
+                        ) { playing ->
+                            Icon(
+                                if (playing) Icons.Default.Pause else Icons.Default.PlayArrow,
+                                contentDescription = "Play/Pause",
+                                tint = MaterialTheme.colorScheme.background,
+                                modifier = Modifier.size(48.dp)
+                            )
                         }
-                        IconButton(
-                            onClick = onPlayPause,
-                            modifier = Modifier
-                                .size(72.dp)
-                                .clip(CircleShape)
-                                .background(MaterialTheme.colorScheme.primary)
-                        ) {
-                            AnimatedContent(
-                                targetState = isPlaying,
-                                transitionSpec = { scaleIn() togetherWith scaleOut() },
-                                label = "FullScreenPlayPauseIconAnimation"
-                            ) { playing ->
-                                Icon(
-                                    if (playing) Icons.Default.Pause else Icons.Default.PlayArrow,
-                                    contentDescription = "Play/Pause",
-                                    tint = MaterialTheme.colorScheme.background,
-                                    modifier = Modifier.size(48.dp)
-                                )
-                            }
-                        }
-                        IconButton(onClick = { /*TODO: Next*/ }) {
-                            Icon(Icons.Default.SkipNext, contentDescription = "Next", tint = MaterialTheme.colorScheme.secondary, modifier = Modifier.size(40.dp))
-                        }
+                    }
+                    IconButton(onClick = { vm.skipNext() }) {
+                        Icon(Icons.Default.SkipNext, contentDescription = "Next", tint = MaterialTheme.colorScheme.secondary, modifier = Modifier.size(40.dp))
+                    }
+                    IconButton(onClick = { /*TODO: Repeat*/ }) {
+                        Icon(Icons.Default.Repeat, contentDescription = "Repeat", tint = MaterialTheme.colorScheme.secondary)
                     }
                 }
             }
