@@ -4,6 +4,7 @@ package com.example.lilt
 
 import android.app.Application
 import android.content.Context
+import android.content.Intent
 import android.graphics.drawable.BitmapDrawable
 import android.net.Uri
 import androidx.activity.compose.BackHandler
@@ -19,6 +20,7 @@ import androidx.compose.animation.slideInHorizontally
 import androidx.compose.animation.slideInVertically
 import androidx.compose.animation.slideOutVertically
 import androidx.compose.animation.togetherWith
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -55,8 +57,9 @@ import androidx.compose.material.icons.filled.Repeat
 import androidx.compose.material.icons.filled.Shuffle
 import androidx.compose.material.icons.filled.SkipNext
 import androidx.compose.material.icons.filled.SkipPrevious
+import androidx.compose.material3.Button
+import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.CircularProgressIndicator
-import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FloatingActionButton
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -99,7 +102,10 @@ import androidx.media3.common.util.UnstableApi
 import androidx.media3.exoplayer.ExoPlayer
 import androidx.palette.graphics.Palette
 import coil.Coil
+import coil.ImageLoader
 import coil.compose.rememberAsyncImagePainter
+import coil.disk.DiskCache
+import coil.memory.MemoryCache
 import coil.request.ImageRequest
 import com.example.lilt.ui.theme.AppTypography
 import com.jakewharton.retrofit2.converter.kotlinx.serialization.asConverterFactory
@@ -121,6 +127,40 @@ import java.net.URLEncoder
 import java.text.SimpleDateFormat
 import java.util.Locale
 import kotlin.math.roundToInt
+
+// --- APPLICATION CLASS FOR SINGLETONS ---
+
+/**
+ * Custom Application class to set up a singleton Coil ImageLoader.
+ * This ensures a shared, optimized image cache across the entire app.
+ *
+ * IMPORTANT: You must register this class in your AndroidManifest.xml file:
+ * <application
+ * android:name=".LiltApplication"
+ * ... >
+ * ...
+ * </application>
+ */
+class LiltApplication : Application() {
+    override fun onCreate() {
+        super.onCreate()
+        val imageLoader = ImageLoader.Builder(this)
+            .memoryCache {
+                MemoryCache.Builder(this)
+                    .maxSizePercent(0.25) // Use 25% of app's available memory for image cache
+                    .build()
+            }
+            .diskCache {
+                DiskCache.Builder()
+                    .directory(this.cacheDir.resolve("image_cache"))
+                    .maxSizePercent(0.05) // Use 5% of available disk space for image cache
+                    .build()
+            }
+            .build()
+        Coil.setImageLoader(imageLoader)
+    }
+}
+
 
 // --- THEME COLORS & MODELS ---
 
@@ -274,7 +314,10 @@ class PlayerController(private val app: Application) {
 
 class EnergyViewModel(app: Application) : AndroidViewModel(app) {
     private val repo = EnergyRepository()
-    internal val player = PlayerController(app)
+    private val player = PlayerController(app)
+
+    // OPTIMIZATION: In-memory cache for dominant colors to avoid re-calculating.
+    private val dominantColorCache = mutableMapOf<String, Color>()
 
     var loading by mutableStateOf(false)
         private set
@@ -397,6 +440,16 @@ class EnergyViewModel(app: Application) : AndroidViewModel(app) {
         showPlayer = false
     }
 
+    // OPTIMIZATION: Function to get dominant color, using the cache.
+    suspend fun getDominantColorForSong(context: Context, imageUrl: String): Color? {
+        if (dominantColorCache.containsKey(imageUrl)) {
+            return dominantColorCache[imageUrl]
+        }
+        val color = getDominantColor(context, imageUrl)
+        color?.let { dominantColorCache[imageUrl] = it }
+        return color
+    }
+
     private fun startProgressUpdater() {
         stopProgressUpdater()
         progressUpdaterJob = viewModelScope.launch {
@@ -431,7 +484,8 @@ class EnergyViewModel(app: Application) : AndroidViewModel(app) {
     }
 }
 
-@OptIn(ExperimentalMaterial3Api::class)
+// --- ROOT COMPOSABLE ---
+
 @Composable
 fun EnergyPlayerScreen(modifier: Modifier = Modifier) {
     val context = LocalContext.current
@@ -449,7 +503,12 @@ fun EnergyPlayerScreen(modifier: Modifier = Modifier) {
                 vm.error != null -> ErrorState(vm.error!!, onRetry = { vm.fetchSongs(forceReload = true) })
                 vm.loading && vm.songs.isEmpty() -> LoadingState()
                 else -> {
-                    SongListWithCollapsingToolbar(vm)
+                    SongListWithCollapsingToolbar(
+                        songs = vm.songs,
+                        randomSongs = vm.randomSongs,
+                        selectedSong = vm.selectedSong,
+                        onSongClick = vm::onSongClick
+                    )
                 }
             }
 
@@ -479,13 +538,19 @@ fun EnergyPlayerScreen(modifier: Modifier = Modifier) {
                 exit = slideOutVertically(targetOffsetY = { it }),
                 modifier = Modifier.align(Alignment.BottomCenter)
             ) {
-                MiniPlayer(
-                    vm = vm,
-                    song = vm.selectedSong!!,
-                    isPlaying = vm.isPlaying,
-                    onPlayPause = vm::playPause,
-                    onTap = vm::openFullScreenPlayer
-                )
+                vm.selectedSong?.let { song ->
+                    val progress = if (vm.totalDuration > 0) {
+                        vm.currentPosition.toFloat() / vm.totalDuration.toFloat()
+                    } else 0f
+
+                    MiniPlayer(
+                        song = song,
+                        isPlaying = vm.isPlaying,
+                        progress = progress,
+                        onPlayPause = vm::playPause,
+                        onTap = vm::openFullScreenPlayer
+                    )
+                }
             }
 
             AnimatedVisibility(
@@ -493,17 +558,21 @@ fun EnergyPlayerScreen(modifier: Modifier = Modifier) {
                 enter = slideInVertically(initialOffsetY = { it }),
                 exit = slideOutVertically(targetOffsetY = { it })
             ) {
-                vm.selectedSong?.let {
+                vm.selectedSong?.let { song ->
                     FullScreenPlayer(
-                        song = it,
-                        vm = vm,
+                        song = song,
                         isPlaying = vm.isPlaying,
                         onPlayPause = vm::playPause,
                         onClose = vm::closePlayer,
                         currentPosition = vm.currentPosition,
                         totalDuration = vm.totalDuration,
+                        onSeek = vm::onSeek,
+                        onSkipPrevious = vm::skipPrevious,
+                        onSkipNext = vm::skipNext,
                         summary = vm.songSummary,
-                        isSummaryLoading = vm.isSummaryLoading
+                        isSummaryLoading = vm.isSummaryLoading,
+                        // Pass the ViewModel function to get the cached color
+                        getDominantColor = { vm.getDominantColorForSong(context, song.imageUrl) }
                     )
                 }
             }
@@ -511,19 +580,30 @@ fun EnergyPlayerScreen(modifier: Modifier = Modifier) {
     }
 }
 
+// --- UI COMPONENTS ---
+
 @Composable
-fun SongListWithCollapsingToolbar(vm: EnergyViewModel) {
+fun SongListWithCollapsingToolbar(
+    songs: List<Song>,
+    randomSongs: List<Song>,
+    selectedSong: Song?,
+    onSongClick: (Song) -> Unit
+) {
     val lazyListState = rememberLazyListState()
+    val firstSong = songs.firstOrNull()
+    // FIX: Moved remember call to the top-level of the composable.
+    // It cannot be called inside the LazyColumn's content lambda.
+    val popularSongs = remember(songs) { songs.drop(1) }
 
     Box(modifier = Modifier.fillMaxSize()) {
         LazyColumn(
             state = lazyListState,
             modifier = Modifier
                 .fillMaxSize()
-                .padding(bottom = if (vm.selectedSong != null) 80.dp else 0.dp),
+                .padding(bottom = if (selectedSong != null) 80.dp else 0.dp),
             contentPadding = PaddingValues(top = 300.dp)
         ) {
-            item {
+            item(key = "header_picked_for_you", contentType = "header") {
                 Text(
                     text = "Picked For You",
                     style = AppTypography.bodyLarge,
@@ -533,16 +613,16 @@ fun SongListWithCollapsingToolbar(vm: EnergyViewModel) {
                 )
             }
 
-            if (vm.randomSongs.isNotEmpty()) {
-                item {
+            if (randomSongs.isNotEmpty()) {
+                item(key = "featured_pager", contentType = "pager") {
                     FeaturedSongsPager(
-                        songs = vm.randomSongs,
-                        onSongClick = vm::onSongClick
+                        songs = randomSongs,
+                        onSongClick = onSongClick
                     )
                 }
             }
 
-            item {
+            item(key = "header_popular", contentType = "header") {
                 Spacer(Modifier.height(24.dp))
                 Text(
                     text = "Popular Suggestions",
@@ -554,7 +634,11 @@ fun SongListWithCollapsingToolbar(vm: EnergyViewModel) {
                 Spacer(Modifier.height(8.dp))
             }
 
-            itemsIndexed(vm.songs, key = { _, song -> song.audioUrl }) { index, song ->
+            itemsIndexed(
+                items = popularSongs,
+                key = { _, song -> song.audioUrl },
+                contentType = { _, _ -> "song_item" }
+            ) { index, song ->
                 AnimatedVisibility(
                     visible = true,
                     enter = fadeIn(animationSpec = tween(delayMillis = index * 50)) +
@@ -562,7 +646,7 @@ fun SongListWithCollapsingToolbar(vm: EnergyViewModel) {
                 ) {
                     SongRow(
                         song = song,
-                        onSongClick = { vm.onSongClick(song) },
+                        onSongClick = { onSongClick(song) },
                         modifier = Modifier.padding(horizontal = 16.dp)
                     )
                 }
@@ -584,7 +668,7 @@ fun SongListWithCollapsingToolbar(vm: EnergyViewModel) {
                 }
         ) {
             AnimatedContent(
-                targetState = vm.songs.firstOrNull()?.imageUrl,
+                targetState = firstSong?.imageUrl,
                 transitionSpec = { fadeIn(tween(600)) togetherWith fadeOut(tween(600)) },
                 label = "HeaderImageAnimation"
             ) { targetImageUrl ->
@@ -600,11 +684,61 @@ fun SongListWithCollapsingToolbar(vm: EnergyViewModel) {
                     .fillMaxSize()
                     .background(
                         Brush.verticalGradient(
-                            colors = listOf(Color.Transparent, MaterialTheme.colorScheme.background),
+                            colors = listOf(
+                                Color.Transparent,
+                                MaterialTheme.colorScheme.background
+                            ),
                             startY = 400f
                         )
                     )
             )
+
+            if (firstSong != null) {
+                Row(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .padding(start = 16.dp, end = 12.dp, bottom = 32.dp),
+                    verticalAlignment = Alignment.Bottom,
+                    horizontalArrangement = Arrangement.SpaceBetween
+                ) {
+                    Column(
+                        modifier = Modifier.weight(1f)
+                    ) {
+                        Text(
+                            text = firstSong.title,
+                            color = Color.White,
+                            fontWeight = FontWeight.Bold,
+                            fontSize = 22.sp,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
+                        )
+                        Text(
+                            text = firstSong.artist,
+                            color = Color.White.copy(alpha = 0.8f),
+                            fontSize = 16.sp,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
+                        )
+                    }
+                    Spacer(Modifier.width(16.dp))
+                    Button(
+                        onClick = { onSongClick(firstSong) },
+                        modifier = Modifier.size(50.dp),
+                        shape = CircleShape,
+                        colors = ButtonDefaults.buttonColors(
+                            containerColor = MaterialTheme.colorScheme.primary
+                        ),
+                        contentPadding = PaddingValues(0.dp)
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.PlayArrow,
+                            contentDescription = "Play",
+                            tint = MaterialTheme.colorScheme.onPrimary,
+                            modifier = Modifier.size(24.dp)
+                        )
+                    }
+                }
+            }
         }
     }
 }
@@ -780,17 +914,15 @@ fun SongRow(
 
 @Composable
 fun MiniPlayer(
-    vm: EnergyViewModel,
     song: Song,
     isPlaying: Boolean,
+    progress: Float,
     onPlayPause: () -> Unit,
     onTap: () -> Unit,
     modifier: Modifier = Modifier
 ) {
-    val progress = if (vm.totalDuration > 0) vm.currentPosition.toFloat() / vm.totalDuration.toFloat() else 0f
-
     Surface(
-        color = CardBackground, // Solid background color
+        color = CardBackground,
         modifier = modifier
             .fillMaxWidth()
             .padding(8.dp)
@@ -854,64 +986,35 @@ fun MiniPlayer(
     }
 }
 
-private fun formatTime(ms: Long): String {
-    val totalSeconds = ms / 1000
-    val minutes = totalSeconds / 60
-    val seconds = totalSeconds % 60
-    return String.format("%02d:%02d", minutes, seconds)
-}
-
-// Helper function to extract dominant color from an image URL
-suspend fun getDominantColor(context: Context, imageUrl: String): Color? {
-    return try {
-        val request = ImageRequest.Builder(context)
-            .data(imageUrl)
-            .allowHardware(false) // Important for Palette
-            .build()
-        val drawable = Coil.imageLoader(context).execute(request).drawable
-        val bitmap = (drawable as? BitmapDrawable)?.bitmap ?: return null
-        withContext(Dispatchers.Default) {
-            val palette = Palette.from(bitmap).generate()
-            val colorInt = palette.getVibrantColor(0)
-                .takeIf { it != 0 } ?: palette.getMutedColor(0)
-                .takeIf { it != 0 } ?: palette.getDominantColor(0)
-
-            if (colorInt != 0 && colorInt != null) {
-                Color(colorInt)
-            } else {
-                null
-            }
-        }
-    } catch (e: Exception) {
-        null // Return null on any error
-    }
-}
-
 @Composable
 fun FullScreenPlayer(
     song: Song,
-    vm: EnergyViewModel,
     isPlaying: Boolean,
     onPlayPause: () -> Unit,
     onClose: () -> Unit,
     currentPosition: Long,
     totalDuration: Long,
+    onSeek: (Float) -> Unit,
+    onSkipPrevious: () -> Unit,
+    onSkipNext: () -> Unit,
     summary: String?,
-    isSummaryLoading: Boolean
+    isSummaryLoading: Boolean,
+    getDominantColor: suspend () -> Color? // Pass the function
 ) {
     var offsetY by remember { mutableFloatStateOf(0f) }
     var dominantColor by remember { mutableStateOf<Color?>(null) }
-    val context = LocalContext.current
 
+    // Effect will re-launch when the song's imageUrl changes
     LaunchedEffect(song.imageUrl) {
-        dominantColor = getDominantColor(context, song.imageUrl)
+        dominantColor = getDominantColor()
     }
 
     val gradientBrush = dominantColor?.let {
         Brush.verticalGradient(
-            colors = listOf(it, MaterialTheme.colorScheme.background)
+            colors = listOf(it.copy(alpha = 0.4f), MaterialTheme.colorScheme.background),
+            endY = 1200f
         )
-    } ?: Brush.verticalGradient( // Default gradient
+    } ?: Brush.verticalGradient(
         colors = listOf(MaterialTheme.colorScheme.primary.copy(alpha = 0.3f), MaterialTheme.colorScheme.background)
     )
 
@@ -1000,6 +1103,38 @@ fun FullScreenPlayer(
                 )
 
                 Spacer(Modifier.height(16.dp))
+
+                val context = LocalContext.current
+                val encodedQuery = remember(song.title, song.artist) {
+                    val songName = URLEncoder.encode(song.title, "UTF-8")
+                    val artistName = URLEncoder.encode(song.artist, "UTF-8")
+                    "$songName+$artistName"
+                }
+
+                OutlinedButton(
+                    onClick = {
+                        val intent = Intent(Intent.ACTION_VIEW, Uri.parse("https://www.youtube.com/results?search_query=$encodedQuery"))
+                        try {
+                            context.startActivity(intent)
+                        } catch (e: Exception) {
+                            // Handle case where no browser is available, though unlikely.
+                        }
+                    },
+                    shape = CircleShape,
+                    colors = ButtonDefaults.outlinedButtonColors(contentColor = TextSecondary),
+                    border = BorderStroke(1.dp, TextSecondary)
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.PlayArrow, // A generic play icon
+                        contentDescription = "YouTube",
+                        modifier = Modifier.size(18.dp)
+                    )
+                    Spacer(Modifier.width(8.dp))
+                    Text("Listen on YouTube")
+                }
+
+
+                Spacer(Modifier.height(16.dp))
                 Box(
                     modifier = Modifier
                         .fillMaxWidth()
@@ -1050,7 +1185,7 @@ fun FullScreenPlayer(
 
                 Slider(
                     value = currentPosition.toFloat(),
-                    onValueChange = { vm.onSeek(it) },
+                    onValueChange = { onSeek(it) },
                     valueRange = 0f..totalDuration.toFloat().coerceAtLeast(1f),
                     modifier = Modifier.fillMaxWidth(),
                     colors = SliderDefaults.colors(
@@ -1074,7 +1209,7 @@ fun FullScreenPlayer(
                     IconButton(onClick = { /*TODO: Shuffle*/ }) {
                         Icon(Icons.Default.Shuffle, contentDescription = "Shuffle", tint = MaterialTheme.colorScheme.secondary)
                     }
-                    IconButton(onClick = { vm.skipPrevious() }) {
+                    IconButton(onClick = onSkipPrevious) {
                         Icon(Icons.Default.SkipPrevious, contentDescription = "Previous", tint = MaterialTheme.colorScheme.secondary, modifier = Modifier.size(40.dp))
                     }
                     IconButton(
@@ -1097,7 +1232,7 @@ fun FullScreenPlayer(
                             )
                         }
                     }
-                    IconButton(onClick = { vm.skipNext() }) {
+                    IconButton(onClick = onSkipNext) {
                         Icon(Icons.Default.SkipNext, contentDescription = "Next", tint = MaterialTheme.colorScheme.secondary, modifier = Modifier.size(40.dp))
                     }
                     IconButton(onClick = { /*TODO: Repeat*/ }) {
@@ -1106,5 +1241,36 @@ fun FullScreenPlayer(
                 }
             }
         }
+    }
+}
+
+// --- HELPER FUNCTIONS ---
+
+private fun formatTime(ms: Long): String {
+    val totalSeconds = ms / 1000
+    val minutes = totalSeconds / 60
+    val seconds = totalSeconds % 60
+    return String.format("%02d:%02d", minutes, seconds)
+}
+
+suspend fun getDominantColor(context: Context, imageUrl: String): Color? {
+    return try {
+        val request = ImageRequest.Builder(context)
+            .data(imageUrl)
+            .allowHardware(false) // Important for Palette
+            .build()
+        // Use the singleton ImageLoader from Coil
+        val drawable = Coil.imageLoader(context).execute(request).drawable
+        val bitmap = (drawable as? BitmapDrawable)?.bitmap ?: return null
+        withContext(Dispatchers.Default) {
+            val palette = Palette.from(bitmap).generate()
+            val colorInt = palette.getVibrantColor(0)
+                .takeIf { it != 0 } ?: palette.getMutedColor(0)
+                .takeIf { it != 0 } ?: palette.getDominantColor(0)
+
+            if (colorInt != 0) Color(colorInt) else null
+        }
+    } catch (e: Exception) {
+        null // Return null on any error
     }
 }
