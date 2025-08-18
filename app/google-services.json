@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "382820016455",
+    "project_id": "lity-9187e",
+    "storage_bucket": "lity-9187e.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:382820016455:android:3e70cf8cfe3fd79e976c62",
+        "android_client_info": {
+          "package_name": "com.example.lilt"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyA6C-FcMRgsl72l4T6L88n0xM9pMvI8K0o"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}

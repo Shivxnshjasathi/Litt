@@ -24,18 +24,33 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.navigation.NavController
 import com.example.lilt.ui.theme.AppTypography
+import com.google.firebase.auth.ktx.auth
+import com.google.firebase.ktx.Firebase
 import kotlinx.coroutines.delay
 
 @Composable
 fun SplashScreen(modifier: Modifier = Modifier, navController: NavController) {
 
     LaunchedEffect(key1 = true) {
-        delay(3000L) // Wait for 3 seconds
-        navController.navigate("energyPlayer") {
-            popUpTo("splash") { inclusive = true }
+        delay(3000L)
+
+        val user = Firebase.auth.currentUser
+        val destination = if (user != null) {
+            "energyPlayer"
+        } else {
+            "auth" // If not logged in, go to the auth screen
+        }
+
+        // Perform the navigation
+        navController.navigate(destination) {
+            // Remove the splash screen from the back stack so the user can't go back to it
+            popUpTo("landingScreen") {
+                inclusive = true
+            }
         }
     }
 
+    // Animation for the pulsating text effect
     val infiniteTransition = rememberInfiniteTransition(label = "splash_transition")
     val alpha by infiniteTransition.animateFloat(
         initialValue = 0.8f,
@@ -46,6 +61,7 @@ fun SplashScreen(modifier: Modifier = Modifier, navController: NavController) {
         ), label = "splash_alpha"
     )
 
+    // UI Layout for the Splash Screen
     Box(
         modifier = modifier.fillMaxSize()
     ) {
@@ -84,14 +100,6 @@ fun SplashScreen(modifier: Modifier = Modifier, navController: NavController) {
                 color = MaterialTheme.colorScheme.secondary,
                 style = AppTypography.titleLarge,
                 modifier = Modifier.alpha(alpha) // Apply the pulsating alpha
-            )
-            Spacer(modifier = Modifier.height(16.dp))
-            Text(
-                text = "Personalized music recommendations, just for you.",
-                textAlign = TextAlign.Center,
-                color = MaterialTheme.colorScheme.secondary.copy(alpha = 0.8f),
-                style = AppTypography.bodyLarge,
-                modifier = Modifier.padding(top = 8.dp)
             )
             Spacer(modifier = Modifier.height(16.dp))
             Text(
