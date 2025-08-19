@@ -69,6 +69,7 @@ import androidx.compose.material3.Slider
 import androidx.compose.material3.SliderDefaults
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -93,6 +94,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.ui.window.Dialog
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewModelScope
@@ -332,6 +334,11 @@ class EnergyViewModel(app: Application) : AndroidViewModel(app) {
     var showPlayer by mutableStateOf(false)
         private set
 
+    // State for the summary dialog
+    var songForSummary by mutableStateOf<Song?>(null)
+        private set
+    var showSummaryDialog by mutableStateOf(false)
+        private set
     var songSummary by mutableStateOf<String?>(null)
         private set
     var isSummaryLoading by mutableStateOf(false)
@@ -385,7 +392,6 @@ class EnergyViewModel(app: Application) : AndroidViewModel(app) {
         } else {
             selectedSong = song
             player.play(song.audioUrl)
-            fetchSongSummary(song)
         }
     }
 
@@ -402,6 +408,18 @@ class EnergyViewModel(app: Application) : AndroidViewModel(app) {
                 isSummaryLoading = false
             }
         }
+    }
+
+    fun onShowSummaryClick(song: Song) {
+        songForSummary = song
+        showSummaryDialog = true
+        fetchSongSummary(song)
+    }
+
+    fun onDismissSummary() {
+        showSummaryDialog = false
+        songForSummary = null
+        songSummary = null
     }
 
     fun onSeek(position: Float) {
@@ -507,7 +525,8 @@ fun EnergyPlayerScreen(modifier: Modifier = Modifier) {
                         songs = vm.songs,
                         randomSongs = vm.randomSongs,
                         selectedSong = vm.selectedSong,
-                        onSongClick = vm::onSongClick
+                        onSongClick = vm::onSongClick,
+                        onShowSummaryClick = vm::onShowSummaryClick
                     )
                 }
             }
@@ -553,6 +572,16 @@ fun EnergyPlayerScreen(modifier: Modifier = Modifier) {
                 }
             }
 
+            // Show Summary Dialog when requested
+            AnimatedVisibility(visible = vm.showSummaryDialog) {
+                SongSummaryDialog(
+                    song = vm.songForSummary,
+                    summary = vm.songSummary,
+                    isLoading = vm.isSummaryLoading,
+                    onDismiss = vm::onDismissSummary
+                )
+            }
+
             AnimatedVisibility(
                 visible = vm.showPlayer && vm.selectedSong != null,
                 enter = slideInVertically(initialOffsetY = { it }),
@@ -569,8 +598,6 @@ fun EnergyPlayerScreen(modifier: Modifier = Modifier) {
                         onSeek = vm::onSeek,
                         onSkipPrevious = vm::skipPrevious,
                         onSkipNext = vm::skipNext,
-                        summary = vm.songSummary,
-                        isSummaryLoading = vm.isSummaryLoading,
                         // Pass the ViewModel function to get the cached color
                         getDominantColor = { vm.getDominantColorForSong(context, song.imageUrl) }
                     )
@@ -587,7 +614,8 @@ fun SongListWithCollapsingToolbar(
     songs: List<Song>,
     randomSongs: List<Song>,
     selectedSong: Song?,
-    onSongClick: (Song) -> Unit
+    onSongClick: (Song) -> Unit,
+    onShowSummaryClick: (Song) -> Unit
 ) {
     val lazyListState = rememberLazyListState()
     val firstSong = songs.firstOrNull()
@@ -647,6 +675,7 @@ fun SongListWithCollapsingToolbar(
                     SongRow(
                         song = song,
                         onSongClick = { onSongClick(song) },
+                        onMoreClick = { onShowSummaryClick(song) },
                         modifier = Modifier.padding(horizontal = 16.dp)
                     )
                 }
@@ -762,7 +791,7 @@ fun ErrorState(message: String, onRetry: () -> Unit) {
     ) {
         Text("Error loading songs", color = Color(0xFFEF4444), fontWeight = FontWeight.Bold, fontSize = 18.sp)
         Spacer(Modifier.height(8.dp))
-        Text(message, color = TextSecondary, textAlign = TextAlign.Center)
+        Text("Oops! Looks like you're offline", color = TextSecondary, textAlign = TextAlign.Center)
         Spacer(Modifier.height(16.dp))
         OutlinedButton(onClick = onRetry) { Text("Retry", color = MaterialTheme.colorScheme.primary) }
     }
@@ -862,6 +891,7 @@ fun FeaturedSongCard(song: Song, onSongClick: () -> Unit, modifier: Modifier = M
 fun SongRow(
     song: Song,
     onSongClick: () -> Unit,
+    onMoreClick: () -> Unit,
     modifier: Modifier = Modifier
 ) {
     Row(
@@ -900,7 +930,7 @@ fun SongRow(
             )
         }
         Text(song.playTime, color = TextSecondary, fontSize = 12.sp)
-        IconButton(onClick = { /* TODO: Handle more options */ }) {
+        IconButton(onClick = onMoreClick) {
             Icon(
                 imageVector = Icons.Default.MoreVert,
                 contentDescription = "More options",
@@ -909,6 +939,85 @@ fun SongRow(
         }
     }
 }
+
+@Composable
+fun SongSummaryDialog(
+    song: Song?,
+    summary: String?,
+    isLoading: Boolean,
+    onDismiss: () -> Unit
+) {
+    if (song == null) return
+
+    Dialog(onDismissRequest = onDismiss) {
+        Surface(
+            shape = RoundedCornerShape(16.dp),
+            color = CardBackground,
+            border = BorderStroke(1.dp, TextSecondary.copy(alpha = 0.3f))
+        ) {
+            Column(
+                modifier = Modifier.padding(24.dp)
+            ) {
+                Text(
+                    text = song.title,
+                    fontWeight = FontWeight.Bold,
+                    fontSize = 20.sp,
+                    color = MaterialTheme.colorScheme.secondary
+                )
+                Text(
+                    text = song.artist,
+                    fontSize = 16.sp,
+                    color = TextSecondary
+                )
+                Spacer(Modifier.height(16.dp))
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(200.dp),
+                    contentAlignment = Alignment.Center
+                ) {
+                    AnimatedContent(
+                        targetState = isLoading,
+                        label = "SummaryContentAnimation"
+                    ) { loading ->
+                        if (loading) {
+                            CircularProgressIndicator(
+                                modifier = Modifier.size(32.dp),
+                                color = MaterialTheme.colorScheme.primary,
+                                strokeWidth = 3.dp
+                            )
+                        } else if (!summary.isNullOrBlank()) {
+                            Text(
+                                text = summary,
+                                color = TextSecondary,
+                                fontSize = 14.sp,
+                                textAlign = TextAlign.Justify,
+                                modifier = Modifier
+                                    .fillMaxSize()
+                                    .verticalScroll(rememberScrollState())
+                            )
+                        } else {
+                            Text(
+                                text = "No summary available.",
+                                color = TextSecondary.copy(alpha = 0.7f),
+                                fontSize = 14.sp,
+                                textAlign = TextAlign.Center
+                            )
+                        }
+                    }
+                }
+                Spacer(Modifier.height(16.dp))
+                TextButton(
+                    onClick = onDismiss,
+                    modifier = Modifier.align(Alignment.End)
+                ) {
+                    Text("DONE", color = MaterialTheme.colorScheme.primary)
+                }
+            }
+        }
+    }
+}
+
 
 // --- PLAYER COMPOSABLES ---
 
@@ -997,8 +1106,6 @@ fun FullScreenPlayer(
     onSeek: (Float) -> Unit,
     onSkipPrevious: () -> Unit,
     onSkipNext: () -> Unit,
-    summary: String?,
-    isSummaryLoading: Boolean,
     getDominantColor: suspend () -> Color? // Pass the function
 ) {
     var offsetY by remember { mutableFloatStateOf(0f) }
@@ -1133,55 +1240,8 @@ fun FullScreenPlayer(
                     Text("Listen on YouTube")
                 }
 
-
-                Spacer(Modifier.height(16.dp))
-                Box(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .weight(1f),
-                    contentAlignment = Alignment.Center
-                ) {
-                    Box(
-                        modifier = Modifier
-                            .fillMaxSize()
-                            .clip(RoundedCornerShape(12.dp))
-                            .background(CardBackground.copy(alpha = 0.5f))
-                            .padding(12.dp),
-                        contentAlignment = Alignment.Center
-                    ) {
-                        AnimatedContent(
-                            targetState = isSummaryLoading,
-                            label = "SummaryContentAnimation"
-                        ) { loading ->
-                            if (loading) {
-                                CircularProgressIndicator(
-                                    modifier = Modifier.size(32.dp),
-                                    color = MaterialTheme.colorScheme.primary,
-                                    strokeWidth = 3.dp
-                                )
-                            } else if (!summary.isNullOrBlank()) {
-                                Text(
-                                    text = summary,
-                                    color = TextSecondary,
-                                    fontSize = 14.sp,
-                                    textAlign = TextAlign.Justify,
-                                    modifier = Modifier
-                                        .fillMaxSize()
-                                        .verticalScroll(rememberScrollState())
-                                )
-                            } else {
-                                Text(
-                                    text = "No summary available.",
-                                    color = TextSecondary.copy(alpha = 0.7f),
-                                    fontSize = 14.sp,
-                                    textAlign = TextAlign.Center
-                                )
-                            }
-                        }
-                    }
-                }
-
-                Spacer(Modifier.height(16.dp))
+                // Spacer to push controls to the bottom
+                Spacer(Modifier.weight(1f))
 
                 Slider(
                     value = currentPosition.toFloat(),
@@ -1244,7 +1304,6 @@ fun FullScreenPlayer(
     }
 }
 
-// --- HELPER FUNCTIONS ---
 
 private fun formatTime(ms: Long): String {
     val totalSeconds = ms / 1000

@@ -36,7 +36,7 @@ fun SplashScreen(modifier: Modifier = Modifier, navController: NavController) {
 
         val user = Firebase.auth.currentUser
         val destination = if (user != null) {
-            "energyPlayer"
+            "mainScreen"
         } else {
             "auth" // If not logged in, go to the auth screen
         }

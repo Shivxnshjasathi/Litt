@@ -38,10 +38,14 @@ class MainActivity : ComponentActivity() {
                         modifier = Modifier.padding(innerPadding)
                     ) {
                         // Route for the main player screen
-                        composable("energyPlayer") {
-                            EnergyPlayerScreen(
-                                modifier = Modifier.fillMaxSize()
-                            )
+//                        composable("energyPlayer") {
+//                            EnergyPlayerScreen(
+//                                modifier = Modifier.fillMaxSize()
+//                            )
+//                        }
+
+                        composable("mainScreen") {
+                            MainScreen()
                         }
 
                         // Route for the initial splash screen
