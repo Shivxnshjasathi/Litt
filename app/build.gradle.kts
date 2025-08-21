@@ -106,16 +106,21 @@ dependencies {
     implementation ("androidx.palette:palette:1.0.0")
 
     // Firebase
-    implementation(platform("com.google.firebase:firebase-bom:34.1.0"))
+    //implementation(platform("com.google.firebase:firebase-bom:34.1.0"))
     implementation("com.google.firebase:firebase-analytics")
 
-    implementation("com.google.firebase:firebase-auth-ktx")
-
     implementation("androidx.compose.runtime:runtime-livedata:1.6.7")
-    implementation("com.google.firebase:firebase-auth")
-    implementation("com.google.firebase:firebase-firestore")
+    //implementation("com.google.firebase:firebase-auth")
+    //implementation("com.google.firebase:firebase-firestore")
     implementation ("com.google.firebase:firebase-auth-ktx:22.1.1")
+
     implementation(libs.androidx.core.ktx)
+
+    implementation(platform("com.google.firebase:firebase-bom:33.1.1")) // Latest stable BOM
+    implementation("com.google.firebase:firebase-analytics")
+    implementation("com.google.firebase:firebase-auth") // KTX is included by default
+    implementation("com.google.firebase:firebase-firestore")
+
 
 
 

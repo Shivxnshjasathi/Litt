@@ -7,10 +7,15 @@ import android.content.Context
 import android.content.Intent
 import android.graphics.drawable.BitmapDrawable
 import android.net.Uri
+import android.widget.Toast
 import androidx.activity.compose.BackHandler
 import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.animateContentSize
+import androidx.compose.animation.core.RepeatMode
+import androidx.compose.animation.core.animateFloat
+import androidx.compose.animation.core.infiniteRepeatable
+import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
@@ -49,11 +54,11 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Favorite
 import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.Pause
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Refresh
-import androidx.compose.material.icons.filled.Repeat
 import androidx.compose.material.icons.filled.Shuffle
 import androidx.compose.material.icons.filled.SkipNext
 import androidx.compose.material.icons.filled.SkipPrevious
@@ -102,19 +107,27 @@ import androidx.media3.common.MediaItem
 import androidx.media3.common.Player
 import androidx.media3.common.util.UnstableApi
 import androidx.media3.exoplayer.ExoPlayer
+import androidx.navigation.NavController
 import androidx.palette.graphics.Palette
 import coil.Coil
 import coil.ImageLoader
-import coil.compose.rememberAsyncImagePainter
+import coil.compose.SubcomposeAsyncImage
 import coil.disk.DiskCache
 import coil.memory.MemoryCache
 import coil.request.ImageRequest
 import com.example.lilt.ui.theme.AppTypography
+import com.google.firebase.auth.FirebaseAuth
+import com.google.firebase.auth.ktx.auth
+import com.google.firebase.firestore.FirebaseFirestore
+import com.google.firebase.firestore.firestore
+import com.google.firebase.firestore.ktx.firestore
+import com.google.firebase.ktx.Firebase
 import com.jakewharton.retrofit2.converter.kotlinx.serialization.asConverterFactory
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.tasks.await
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
@@ -132,17 +145,6 @@ import kotlin.math.roundToInt
 
 // --- APPLICATION CLASS FOR SINGLETONS ---
 
-/**
- * Custom Application class to set up a singleton Coil ImageLoader.
- * This ensures a shared, optimized image cache across the entire app.
- *
- * IMPORTANT: You must register this class in your AndroidManifest.xml file:
- * <application
- * android:name=".LiltApplication"
- * ... >
- * ...
- * </application>
- */
 class LiltApplication : Application() {
     override fun onCreate() {
         super.onCreate()
@@ -180,12 +182,13 @@ data class EnergySongDto(
 
 typealias EnergySongsResponse = List<EnergySongDto>
 
+@Serializable // Add annotation for Firestore serialization
 data class Song(
-    val title: String,
-    val artist: String,
-    val imageUrl: String,
-    val audioUrl: String,
-    val playTime: String
+    val title: String = "", // Add default values for Firestore deserialization
+    val artist: String = "",
+    val imageUrl: String = "",
+    val audioUrl: String = "",
+    val playTime: String = ""
 )
 
 // --- API & REPOSITORY ---
@@ -315,10 +318,11 @@ class PlayerController(private val app: Application) {
 // --- VIEW MODEL ---
 
 class EnergyViewModel(app: Application) : AndroidViewModel(app) {
-    private val repo = EnergyRepository()
+    private val repo = EnergyRepository(ApiClient.api)
     private val player = PlayerController(app)
+    private val db: FirebaseFirestore = Firebase.firestore
+    private val auth: FirebaseAuth = Firebase.auth
 
-    // OPTIMIZATION: In-memory cache for dominant colors to avoid re-calculating.
     private val dominantColorCache = mutableMapOf<String, Color>()
 
     var loading by mutableStateOf(false)
@@ -365,6 +369,7 @@ class EnergyViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     init {
+        // User is expected to be authenticated via AuthScreen.
         player.exo.addListener(playerListener)
         fetchSongs()
         startAutoRefresh()
@@ -392,6 +397,27 @@ class EnergyViewModel(app: Application) : AndroidViewModel(app) {
         } else {
             selectedSong = song
             player.play(song.audioUrl)
+        }
+    }
+
+    fun saveSongToFavorites(song: Song) {
+        val userId = auth.currentUser?.uid
+        if (userId == null) {
+            Toast.makeText(getApplication(), "You must be signed in to save songs.", Toast.LENGTH_SHORT).show()
+            return
+        }
+
+        viewModelScope.launch {
+            try {
+                // Using the song title as the document ID to prevent duplicates
+                db.collection("users").document(userId)
+                    .collection("saved_songs").document(song.title)
+                    .set(song)
+                    .await()
+                Toast.makeText(getApplication(), "Song saved!", Toast.LENGTH_SHORT).show()
+            } catch (e: Exception) {
+                Toast.makeText(getApplication(), "Failed to save song: ${e.message}", Toast.LENGTH_LONG).show()
+            }
         }
     }
 
@@ -505,7 +531,11 @@ class EnergyViewModel(app: Application) : AndroidViewModel(app) {
 // --- ROOT COMPOSABLE ---
 
 @Composable
-fun EnergyPlayerScreen(modifier: Modifier = Modifier) {
+fun EnergyPlayerScreen(
+    modifier: Modifier = Modifier,
+    navController: NavController,
+    authViewModel: AuthViewModel // Accept AuthViewModel to ensure context
+) {
     val context = LocalContext.current
     val vm: EnergyViewModel = remember {
         val app = context.applicationContext as Application
@@ -598,7 +628,7 @@ fun EnergyPlayerScreen(modifier: Modifier = Modifier) {
                         onSeek = vm::onSeek,
                         onSkipPrevious = vm::skipPrevious,
                         onSkipNext = vm::skipNext,
-                        // Pass the ViewModel function to get the cached color
+                        onSaveSong = { vm.saveSongToFavorites(song) },
                         getDominantColor = { vm.getDominantColorForSong(context, song.imageUrl) }
                     )
                 }
@@ -619,8 +649,6 @@ fun SongListWithCollapsingToolbar(
 ) {
     val lazyListState = rememberLazyListState()
     val firstSong = songs.firstOrNull()
-    // FIX: Moved remember call to the top-level of the composable.
-    // It cannot be called inside the LazyColumn's content lambda.
     val popularSongs = remember(songs) { songs.drop(1) }
 
     Box(modifier = Modifier.fillMaxSize()) {
@@ -701,11 +729,10 @@ fun SongListWithCollapsingToolbar(
                 transitionSpec = { fadeIn(tween(600)) togetherWith fadeOut(tween(600)) },
                 label = "HeaderImageAnimation"
             ) { targetImageUrl ->
-                Image(
-                    painter = rememberAsyncImagePainter(model = targetImageUrl),
+                ShimmerImage(
+                    imageUrl = targetImageUrl,
                     contentDescription = "Header background",
-                    modifier = Modifier.fillMaxSize(),
-                    contentScale = ContentScale.Crop
+                    modifier = Modifier.fillMaxSize()
                 )
             }
             Box(
@@ -860,10 +887,9 @@ fun FeaturedSongCard(song: Song, onSongClick: () -> Unit, modifier: Modifier = M
             .width(400.dp)
             .clickable(onClick = onSongClick)
     ) {
-        Image(
-            painter = rememberAsyncImagePainter(song.imageUrl),
+        ShimmerImage(
+            imageUrl = song.imageUrl,
             contentDescription = song.title,
-            contentScale = ContentScale.Crop,
             modifier = Modifier
                 .aspectRatio(1f)
                 .clip(RoundedCornerShape(16.dp))
@@ -903,13 +929,12 @@ fun SongRow(
             .padding(vertical = 8.dp)
             .animateContentSize()
     ) {
-        Image(
-            painter = rememberAsyncImagePainter(song.imageUrl),
+        ShimmerImage(
+            imageUrl = song.imageUrl,
             contentDescription = song.title,
             modifier = Modifier
                 .size(56.dp)
-                .clip(RoundedCornerShape(8.dp)),
-            contentScale = ContentScale.Crop
+                .clip(RoundedCornerShape(8.dp))
         )
         Spacer(Modifier.width(16.dp))
         Column(Modifier.weight(1f)) {
@@ -1018,6 +1043,66 @@ fun SongSummaryDialog(
     }
 }
 
+// --- SHIMMER & IMAGE HELPERS ---
+
+@Composable
+fun shimmerBrush(): Brush {
+    val shimmerColors = listOf(
+        CardBackground.copy(alpha = 0.9f),
+        CardBackground.copy(alpha = 0.5f),
+        CardBackground.copy(alpha = 0.9f),
+    )
+
+    val transition = rememberInfiniteTransition(label = "shimmer transition")
+    val translateAnim = transition.animateFloat(
+        initialValue = 0f,
+        targetValue = 1000f,
+        animationSpec = infiniteRepeatable(
+            animation = tween(durationMillis = 1200),
+            repeatMode = RepeatMode.Restart
+        ),
+        label = "shimmer animation"
+    )
+
+    return Brush.linearGradient(
+        colors = shimmerColors,
+        start = Offset.Zero,
+        end = Offset(x = translateAnim.value, y = translateAnim.value)
+    )
+}
+
+@Composable
+fun ShimmerImage(
+    imageUrl: String?,
+    contentDescription: String?,
+    modifier: Modifier = Modifier,
+    contentScale: ContentScale = ContentScale.Crop,
+) {
+    SubcomposeAsyncImage(
+        model = ImageRequest.Builder(LocalContext.current)
+            .data(imageUrl)
+            .crossfade(true)
+            .build(),
+        contentDescription = contentDescription,
+        contentScale = contentScale,
+        modifier = modifier,
+        loading = {
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .background(shimmerBrush())
+            )
+        },
+        error = {
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .background(CardBackground)
+            )
+        }
+    )
+}
+
 
 // --- PLAYER COMPOSABLES ---
 
@@ -1062,10 +1147,9 @@ fun MiniPlayer(
                     verticalAlignment = Alignment.CenterVertically,
                     modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp)
                 ) {
-                    Image(
-                        painter = rememberAsyncImagePainter(targetSong.imageUrl),
+                    ShimmerImage(
+                        imageUrl = targetSong.imageUrl,
                         contentDescription = "Album Art",
-                        contentScale = ContentScale.Crop,
                         modifier = Modifier
                             .size(48.dp)
                             .clip(RoundedCornerShape(8.dp))
@@ -1106,6 +1190,7 @@ fun FullScreenPlayer(
     onSeek: (Float) -> Unit,
     onSkipPrevious: () -> Unit,
     onSkipNext: () -> Unit,
+    onSaveSong: () -> Unit,
     getDominantColor: suspend () -> Color? // Pass the function
 ) {
     var offsetY by remember { mutableFloatStateOf(0f) }
@@ -1179,10 +1264,9 @@ fun FullScreenPlayer(
                         targetState = song.imageUrl,
                         label = "FullScreenArtAnimation"
                     ) { imageUrl ->
-                        Image(
-                            painter = rememberAsyncImagePainter(imageUrl),
+                        ShimmerImage(
+                            imageUrl = imageUrl,
                             contentDescription = "Album Art",
-                            contentScale = ContentScale.Crop,
                             modifier = Modifier.fillMaxSize()
                         )
                     }
@@ -1295,14 +1379,15 @@ fun FullScreenPlayer(
                     IconButton(onClick = onSkipNext) {
                         Icon(Icons.Default.SkipNext, contentDescription = "Next", tint = MaterialTheme.colorScheme.secondary, modifier = Modifier.size(40.dp))
                     }
-                    IconButton(onClick = { /*TODO: Repeat*/ }) {
-                        Icon(Icons.Default.Repeat, contentDescription = "Repeat", tint = MaterialTheme.colorScheme.secondary)
+                    IconButton(onClick = onSaveSong) {
+                        Icon(Icons.Default.Favorite, contentDescription = "Save Song", tint = MaterialTheme.colorScheme.secondary)
                     }
                 }
             }
         }
     }
 }
+
 
 
 private fun formatTime(ms: Long): String {

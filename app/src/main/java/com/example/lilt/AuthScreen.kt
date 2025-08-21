@@ -101,7 +101,7 @@ fun AuthScreen(
     // Handle successful authentication
     LaunchedEffect(authResult) {
         if (authResult?.user != null) {
-            navController.navigate("energyPlayer") {
+            navController.navigate("landingScreen") {
                 popUpTo("auth") { inclusive = true } // Navigate and clear back stack
             }
         }

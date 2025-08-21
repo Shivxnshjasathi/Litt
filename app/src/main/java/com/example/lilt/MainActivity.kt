@@ -30,20 +30,12 @@ class MainActivity : ComponentActivity() {
                 Scaffold(
                     modifier = Modifier.fillMaxSize()
                 ) { innerPadding ->
-                    // The NavHost will always start at the landing/splash screen now.
-                    // The logic to decide the next screen is moved to the SplashScreen itself.
+
                     NavHost(
                         navController = navController,
                         startDestination = "landingScreen",
                         modifier = Modifier.padding(innerPadding)
                     ) {
-                        // Route for the main player screen
-//                        composable("energyPlayer") {
-//                            EnergyPlayerScreen(
-//                                modifier = Modifier.fillMaxSize()
-//                            )
-//                        }
-
                         composable("mainScreen") {
                             MainScreen()
                         }
