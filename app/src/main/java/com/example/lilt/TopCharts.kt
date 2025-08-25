@@ -27,6 +27,7 @@ import androidx.compose.ui.unit.sp
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import coil.compose.AsyncImage
+import com.example.lilt.ui.theme.AppTypography
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -144,7 +145,11 @@ fun TopCharts() {
             containerColor = Color.Transparent, // Make Scaffold transparent
             topBar = {
                 TopAppBar(
-                    title = { Text("Top Charts", fontWeight = FontWeight.Bold) },
+                    title = { Text("Top Charts", style = AppTypography.titleMedium,
+                        fontWeight = FontWeight.Bold,
+                        color = MaterialTheme.colorScheme.secondary,
+                        modifier = Modifier.padding(vertical = 16.dp)) },
+
                     modifier = Modifier.statusBarsPadding(), // Added padding for the status bar
                     colors = TopAppBarDefaults.topAppBarColors(
                         containerColor = Color.Transparent, // Make TopAppBar transparent

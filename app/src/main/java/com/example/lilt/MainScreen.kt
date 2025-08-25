@@ -88,7 +88,7 @@ sealed class BottomNavItem(
 ) {
     object Home : BottomNavItem("energyPlayer", "Home", Icons.Filled.Home, Icons.Outlined.Home)
     object Saved : BottomNavItem("saved", "Saved", Icons.Filled.Favorite, Icons.Outlined.FavoriteBorder)
-    object Profile : BottomNavItem("profile", "Top Charts", Icons.Filled.InsertChartOutlined, Icons.Filled.InsertChart)
+    object Profile : BottomNavItem("profile", "Top Charts", Icons.Filled.InsertChart, Icons.Filled.InsertChartOutlined)
 }
 
 // This is the main screen that will host the bottom navigation and the content screens
@@ -301,7 +301,7 @@ fun SavedSongsScreen(savedSongsViewModel: SavedSongsViewModel = viewModel()) {
                         item {
                             Text(
                                 text = "Saved Songs",
-                                style = AppTypography.bodyLarge,
+                                style = AppTypography.titleMedium,
                                 fontWeight = FontWeight.Bold,
                                 color = MaterialTheme.colorScheme.secondary,
                                 modifier = Modifier.padding(horizontal = 16.dp, vertical = 16.dp)
