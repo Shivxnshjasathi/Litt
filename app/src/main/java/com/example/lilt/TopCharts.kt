@@ -4,6 +4,9 @@ import android.content.Context
 import android.content.Intent
 import android.net.Uri
 import android.util.Log
+import androidx.compose.animation.*
+import androidx.compose.animation.core.*
+import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
@@ -16,14 +19,18 @@ import androidx.compose.material3.TabRowDefaults.tabIndicatorOffset
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.composed
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
+import androidx.compose.ui.unit.toSize
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import coil.compose.AsyncImage
@@ -64,7 +71,7 @@ class BillboardViewModel : ViewModel() {
     var billboard200 by mutableStateOf<List<ChartItem>>(emptyList())
     var global200 by mutableStateOf<List<ChartItem>>(emptyList())
     var artist100 by mutableStateOf<List<ChartItem>>(emptyList())
-    var isLoading by mutableStateOf(false)
+    var isLoading by mutableStateOf(true)
     var errorMessage by mutableStateOf<String?>(null)
 
     private val client = OkHttpClient()
@@ -81,6 +88,8 @@ class BillboardViewModel : ViewModel() {
             errorMessage = null
             Log.d(TAG, "Starting to fetch all charts...")
             try {
+                // Simulate network delay for showing shimmer
+                kotlinx.coroutines.delay(1500)
                 hot100 = fetchChart("https://raw.githubusercontent.com/KoreanThinker/billboard-json/main/billboard-hot-100/recent.json")
                 billboard200 = fetchChart("https://raw.githubusercontent.com/KoreanThinker/billboard-json/main/billboard-200/recent.json")
                 global200 = fetchChart("https://raw.githubusercontent.com/KoreanThinker/billboard-json/main/billboard-global-200/recent.json")
@@ -142,17 +151,20 @@ fun TopCharts() {
             )
     ) {
         Scaffold(
-            containerColor = Color.Transparent, // Make Scaffold transparent
+            containerColor = Color.Transparent,
             topBar = {
                 TopAppBar(
-                    title = { Text("Top Charts", style = AppTypography.titleMedium,
-                        fontWeight = FontWeight.Bold,
-                        color = MaterialTheme.colorScheme.secondary,
-                        modifier = Modifier.padding(vertical = 16.dp)) },
-
-                    modifier = Modifier.statusBarsPadding(), // Added padding for the status bar
+                    title = {
+                        Text(
+                            "Top Charts",
+                            style = AppTypography.titleMedium,
+                            color = MaterialTheme.colorScheme.secondary,
+                            modifier = Modifier.padding(vertical = 16.dp)
+                        )
+                    },
+                    modifier = Modifier.statusBarsPadding(),
                     colors = TopAppBarDefaults.topAppBarColors(
-                        containerColor = Color.Transparent, // Make TopAppBar transparent
+                        containerColor = Color.Transparent,
                         titleContentColor = Color.White
                     )
                 )
@@ -161,7 +173,7 @@ fun TopCharts() {
             Column(modifier = Modifier.padding(paddingValues)) {
                 TabRow(
                     selectedTabIndex = selectedTabIndex,
-                    containerColor = Color.Transparent, // Make TabRow transparent
+                    containerColor = Color.Transparent,
                     contentColor = Color.White,
                     indicator = { tabPositions ->
                         TabRowDefaults.Indicator(
@@ -174,38 +186,47 @@ fun TopCharts() {
                         Tab(
                             selected = selectedTabIndex == index,
                             onClick = { selectedTabIndex = index },
-                            text = { Text(title) },
+                            text = {
+                                Text(title, style = AppTypography.bodyMedium)
+                            },
                             selectedContentColor = Color.White,
                             unselectedContentColor = Color.Gray
                         )
                     }
                 }
 
-                // The main content area
-                Box(
-                    modifier = Modifier.fillMaxSize()
-                ) {
+                Spacer(modifier = Modifier.height(10.dp))
+
+                AnimatedContent(
+                    targetState = selectedTabIndex,
+                    transitionSpec = {
+                        fadeIn(animationSpec = tween(300)) togetherWith
+                                fadeOut(animationSpec = tween(300))
+                    }, label = "tabContentAnimation"
+                ) { targetIndex ->
+                    val chartData = when (targetIndex) {
+                        0 -> viewModel.hot100
+                        1 -> viewModel.billboard200
+                        2 -> viewModel.global200
+                        3 -> viewModel.artist100
+                        else -> emptyList()
+                    }
+
                     if (viewModel.isLoading) {
-                        CircularProgressIndicator(
-                            modifier = Modifier.align(Alignment.Center),
-                            color = Color(0xFF1DB954)
-                        )
+                        LoadingChartGrid()
                     } else if (viewModel.errorMessage != null) {
-                        Text(
-                            text = viewModel.errorMessage!!,
-                            color = MaterialTheme.colorScheme.error,
-                            modifier = Modifier
-                                .align(Alignment.Center)
-                                .padding(16.dp)
-                        )
-                    } else {
-                        val chartData = when (selectedTabIndex) {
-                            0 -> viewModel.hot100
-                            1 -> viewModel.billboard200
-                            2 -> viewModel.global200
-                            3 -> viewModel.artist100
-                            else -> emptyList()
+                        Box(
+                            modifier = Modifier.fillMaxSize(),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Text(
+                                text = viewModel.errorMessage!!,
+                                style = AppTypography.bodyLarge,
+                                color = MaterialTheme.colorScheme.error,
+                                modifier = Modifier.padding(16.dp)
+                            )
                         }
+                    } else {
                         ChartGrid(chartItems = chartData)
                     }
                 }
@@ -214,6 +235,7 @@ fun TopCharts() {
     }
 }
 
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
 fun ChartGrid(chartItems: List<ChartItem>) {
     LazyVerticalGrid(
@@ -223,23 +245,47 @@ fun ChartGrid(chartItems: List<ChartItem>) {
         verticalArrangement = Arrangement.spacedBy(12.dp),
         modifier = Modifier.fillMaxSize()
     ) {
-        items(chartItems) { item ->
-            ChartTileView(item = item)
+        items(chartItems, key = { it.rank }) { item ->
+            ChartTileView(item = item, modifier = Modifier.animateItemPlacement(
+                tween(durationMillis = 300)
+            ))
         }
     }
 }
 
 @Composable
-fun ChartTileView(item: ChartItem) {
+fun LoadingChartGrid() {
+    LazyVerticalGrid(
+        columns = GridCells.Fixed(2),
+        contentPadding = PaddingValues(12.dp),
+        horizontalArrangement = Arrangement.spacedBy(12.dp),
+        verticalArrangement = Arrangement.spacedBy(12.dp),
+        modifier = Modifier.fillMaxSize()
+    ) {
+        items(10) {
+            Box(
+                modifier = Modifier
+                    .aspectRatio(1f)
+                    .clip(RoundedCornerShape(8.dp))
+                    .shimmerEffect()
+            )
+        }
+    }
+}
+
+@Composable
+fun ChartTileView(item: ChartItem, modifier: Modifier = Modifier) {
     val context = LocalContext.current
+    var isImageLoading by remember { mutableStateOf(true) }
+
     Card(
-        modifier = Modifier
+        modifier = modifier
             .aspectRatio(1f)
             .clickable {
                 openYouTube(context, item.name, item.artist)
             },
         shape = RoundedCornerShape(8.dp),
-        elevation = CardDefaults.cardElevation(defaultElevation = 0.dp),
+        elevation = CardDefaults.cardElevation(defaultElevation = 4.dp),
         colors = CardDefaults.cardColors(containerColor = Color.Transparent)
     ) {
         Box(modifier = Modifier.fillMaxSize()) {
@@ -247,27 +293,35 @@ fun ChartTileView(item: ChartItem) {
                 model = item.image,
                 contentDescription = item.name,
                 modifier = Modifier.fillMaxSize(),
-                contentScale = ContentScale.Crop
+                contentScale = ContentScale.Crop,
+                onSuccess = { isImageLoading = false }
             )
+            if (isImageLoading) {
+                Box(modifier = Modifier
+                    .fillMaxSize()
+                    .shimmerEffect())
+            }
             Box(
                 modifier = Modifier
                     .fillMaxSize()
                     .background(
                         Brush.verticalGradient(
-                            colors = listOf(Color.Transparent, MaterialTheme.colorScheme.background.copy(alpha = 0.8f)),
-                            startY = 200f
+                            colors = listOf(
+                                Color.Transparent,
+                                Color.Black.copy(alpha = 0.8f)
+                            ),
+                            startY = 300f
                         )
                     )
             )
             Text(
                 text = "#${item.rank}",
+                style = AppTypography.titleLarge,
                 color = Color.White,
-                fontSize = 22.sp,
-                fontWeight = FontWeight.Bold,
                 modifier = Modifier
                     .align(Alignment.TopStart)
                     .padding(8.dp)
-                    .background(MaterialTheme.colorScheme.background.copy(alpha = 0.6f), RoundedCornerShape(6.dp))
+                    .background(Color.Black.copy(alpha = 0.6f), RoundedCornerShape(6.dp))
                     .padding(horizontal = 8.dp, vertical = 4.dp)
             )
             Column(
@@ -277,17 +331,16 @@ fun ChartTileView(item: ChartItem) {
             ) {
                 Text(
                     text = item.name,
+                    style = AppTypography.bodyMedium.copy(fontWeight = FontWeight.Bold),
                     color = Color.White,
-                    fontWeight = FontWeight.Bold,
-                    fontSize = 14.sp,
                     maxLines = 2,
                     overflow = TextOverflow.Ellipsis
                 )
                 item.artist?.let {
                     Text(
                         text = it,
+                        style = AppTypography.labelSmall,
                         color = Color.White.copy(alpha = 0.8f),
-                        fontSize = 12.sp,
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis
                     )
@@ -301,4 +354,31 @@ fun openYouTube(context: Context, name: String, artist: String?) {
     val searchQuery = URLEncoder.encode("$name ${artist ?: ""}", "UTF-8")
     val intent = Intent(Intent.ACTION_VIEW, Uri.parse("https://www.youtube.com/results?search_query=$searchQuery"))
     context.startActivity(intent)
+}
+
+fun Modifier.shimmerEffect(): Modifier = composed {
+    var size by remember { mutableStateOf(androidx.compose.ui.geometry.Size.Zero) }
+    val transition = rememberInfiniteTransition(label = "shimmerTransition")
+    val startOffsetX by transition.animateFloat(
+        initialValue = -2 * size.width,
+        targetValue = 2 * size.width,
+        animationSpec = infiniteRepeatable(
+            animation = tween(1000)
+        ), label = "shimmer"
+    )
+
+    background(
+        brush = Brush.linearGradient(
+            colors = listOf(
+                Color(0xFF3A3A3A),
+                Color(0xFF505050),
+                Color(0xFF3A3A3A),
+            ),
+            start = Offset(startOffsetX, 0f),
+            end = Offset(startOffsetX + size.width, size.height)
+        )
+    )
+        .onGloballyPositioned {
+            size = it.size.toSize()
+        }
 }
