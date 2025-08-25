@@ -126,48 +126,59 @@ class BillboardViewModel : ViewModel() {
 fun TopCharts() {
     val viewModel = remember { BillboardViewModel() }
     var selectedTabIndex by remember { mutableStateOf(0) }
-    val tabs = listOf("Hot 100", "Billboard 200", "Global 200", "Artist 100")
+    val tabs = listOf("Hot 100", "Board 200", "Fav 100", "Artist 100")
 
-    Scaffold(
-        containerColor = Color.Black,
-        topBar = {
-            TopAppBar(
-                title = { Text("Top Charts", fontWeight = FontWeight.Bold) },
-                colors = TopAppBarDefaults.topAppBarColors(
-                    containerColor = Color.Black,
-                    titleContentColor = Color.White
+    Box(
+        modifier = Modifier
+            .fillMaxSize()
+            .background(
+                Brush.verticalGradient(
+                    listOf(
+                        MaterialTheme.colorScheme.primary.copy(alpha = 0.2f),
+                        MaterialTheme.colorScheme.background
+                    )
                 )
             )
-        }
-    ) { paddingValues ->
-        Column(modifier = Modifier.padding(paddingValues)) {
-            TabRow(
-                selectedTabIndex = selectedTabIndex,
-                containerColor = Color.Black,
-                contentColor = Color.White,
-                indicator = { tabPositions ->
-                    TabRowDefaults.Indicator(
-                        Modifier.tabIndicatorOffset(tabPositions[selectedTabIndex]),
-                        color = Color(0xFF1DB954) // Spotify Green
+    ) {
+        Scaffold(
+            containerColor = Color.Transparent, // Make Scaffold transparent
+            topBar = {
+                TopAppBar(
+                    title = { Text("Top Charts", fontWeight = FontWeight.Bold) },
+                    modifier = Modifier.statusBarsPadding(), // Added padding for the status bar
+                    colors = TopAppBarDefaults.topAppBarColors(
+                        containerColor = Color.Transparent, // Make TopAppBar transparent
+                        titleContentColor = Color.White
                     )
-                }
-            ) {
-                tabs.forEachIndexed { index, title ->
-                    Tab(
-                        selected = selectedTabIndex == index,
-                        onClick = { selectedTabIndex = index },
-                        text = { Text(title) },
-                        selectedContentColor = Color.White,
-                        unselectedContentColor = Color.Gray
-                    )
-                }
+                )
             }
+        ) { paddingValues ->
+            Column(modifier = Modifier.padding(paddingValues)) {
+                TabRow(
+                    selectedTabIndex = selectedTabIndex,
+                    containerColor = Color.Transparent, // Make TabRow transparent
+                    contentColor = Color.White,
+                    indicator = { tabPositions ->
+                        TabRowDefaults.Indicator(
+                            Modifier.tabIndicatorOffset(tabPositions[selectedTabIndex]),
+                            color = Color(0xFF1DB954) // Spotify Green
+                        )
+                    }
+                ) {
+                    tabs.forEachIndexed { index, title ->
+                        Tab(
+                            selected = selectedTabIndex == index,
+                            onClick = { selectedTabIndex = index },
+                            text = { Text(title) },
+                            selectedContentColor = Color.White,
+                            unselectedContentColor = Color.Gray
+                        )
+                    }
+                }
 
-            AnimatedScreen {
+                // The main content area
                 Box(
-                    modifier = Modifier
-                        .fillMaxSize()
-                        .background(Color.Black)
+                    modifier = Modifier.fillMaxSize()
                 ) {
                     if (viewModel.isLoading) {
                         CircularProgressIndicator(
@@ -238,7 +249,7 @@ fun ChartTileView(item: ChartItem) {
                     .fillMaxSize()
                     .background(
                         Brush.verticalGradient(
-                            colors = listOf(Color.Transparent, Color.Black.copy(alpha = 0.8f)),
+                            colors = listOf(Color.Transparent, MaterialTheme.colorScheme.background.copy(alpha = 0.8f)),
                             startY = 200f
                         )
                     )
@@ -251,7 +262,7 @@ fun ChartTileView(item: ChartItem) {
                 modifier = Modifier
                     .align(Alignment.TopStart)
                     .padding(8.dp)
-                    .background(Color.Black.copy(alpha = 0.6f), RoundedCornerShape(6.dp))
+                    .background(MaterialTheme.colorScheme.background.copy(alpha = 0.6f), RoundedCornerShape(6.dp))
                     .padding(horizontal = 8.dp, vertical = 4.dp)
             )
             Column(
