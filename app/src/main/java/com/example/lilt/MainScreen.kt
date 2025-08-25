@@ -27,6 +27,8 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Favorite
 import androidx.compose.material.icons.filled.Home
+import androidx.compose.material.icons.filled.InsertChart
+import androidx.compose.material.icons.filled.InsertChartOutlined
 import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.Person
 import androidx.compose.material.icons.filled.Refresh
@@ -86,7 +88,7 @@ sealed class BottomNavItem(
 ) {
     object Home : BottomNavItem("energyPlayer", "Home", Icons.Filled.Home, Icons.Outlined.Home)
     object Saved : BottomNavItem("saved", "Saved", Icons.Filled.Favorite, Icons.Outlined.FavoriteBorder)
-    object Profile : BottomNavItem("profile", "Profile", Icons.Filled.Person, Icons.Outlined.Person)
+    object Profile : BottomNavItem("profile", "Top Charts", Icons.Filled.InsertChartOutlined, Icons.Filled.InsertChart)
 }
 
 // This is the main screen that will host the bottom navigation and the content screens
@@ -171,7 +173,7 @@ fun BottomNavGraph(
             EnergyPlayerScreen(navController = navController, authViewModel = authViewModel)
         }
         composable(BottomNavItem.Saved.route) { SavedSongsScreen() }
-        composable(BottomNavItem.Profile.route) { ProfileScreen() }
+        composable(BottomNavItem.Profile.route) { TopCharts() }
     }
 }
 
@@ -366,35 +368,3 @@ fun SavedSongsScreen(savedSongsViewModel: SavedSongsViewModel = viewModel()) {
 }
 
 
-@Composable
-fun ProfileScreen() {
-    AnimatedScreen {
-        Box(
-            modifier = Modifier
-                .fillMaxSize()
-                .background(
-                    Brush.verticalGradient(
-                        listOf(
-                            MaterialTheme.colorScheme.secondary.copy(alpha = 0.2f),
-                            MaterialTheme.colorScheme.background
-                        )
-                    )
-                ),
-            contentAlignment = Alignment.Center
-        ) {
-            Column(
-                horizontalAlignment = Alignment.CenterHorizontally,
-                verticalArrangement = Arrangement.Center
-            ) {
-                Icon(
-                    imageVector = Icons.Filled.Person,
-                    contentDescription = "Profile",
-                    modifier = Modifier.size(100.dp),
-                    tint = MaterialTheme.colorScheme.secondary
-                )
-                Spacer(modifier = Modifier.padding(8.dp))
-                Text(text = "Profile Screen", style = MaterialTheme.typography.headlineSmall, color = MaterialTheme.colorScheme.secondary)
-            }
-        }
-    }
-}
