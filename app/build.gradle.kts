@@ -23,7 +23,7 @@ android {
     buildTypes {
         release {
             isMinifyEnabled = true
-
+            isShrinkResources = true
             proguardFiles(
                 getDefaultProguardFile("proguard-android-optimize.txt"),
                 "proguard-rules.pro"
@@ -56,21 +56,17 @@ android {
 }
 
 dependencies {
-    // Core catalog dependencies (keep)
     implementation(libs.androidx.core.ktx)
     implementation(libs.androidx.lifecycle.runtime.ktx)
     implementation(libs.androidx.activity.compose)
 
-    // Compose BOM from your version catalog
     implementation(platform(libs.androidx.compose.bom))
 
-    // Compose UI modules (no explicit versions when using BOM)
     implementation(libs.androidx.ui)
     implementation(libs.androidx.ui.graphics)
     implementation(libs.androidx.ui.tooling.preview)
     implementation(libs.androidx.material3)
 
-    // Test/debug (keep)
     testImplementation(libs.junit)
     androidTestImplementation(libs.androidx.junit)
     androidTestImplementation(libs.androidx.espresso.core)
@@ -79,43 +75,27 @@ dependencies {
     debugImplementation(libs.androidx.ui.tooling)
     debugImplementation(libs.androidx.ui.test.manifest)
 
-    implementation("io.coil-kt:coil-compose:2.7.0") // update to latest stable
+    implementation("io.coil-kt:coil-compose:2.7.0")
 
-    // Retrofit + OkHttp
     implementation("com.squareup.retrofit2:retrofit:2.11.0")
     implementation("com.jakewharton.retrofit:retrofit2-kotlinx-serialization-converter:1.0.0")
     implementation("org.jetbrains.kotlinx:kotlinx-serialization-json:1.7.3")
     implementation("com.squareup.okhttp3:okhttp:4.12.0")
     implementation("com.squareup.okhttp3:logging-interceptor:4.12.0")
-
-
-    // Media3
     implementation("androidx.media3:media3-exoplayer:1.4.1")
     implementation("androidx.media3:media3-ui:1.4.1")
     implementation("androidx.media3:media3-session:1.4.1")
-
-    // Lifecycle (align to latest stable)
     implementation("androidx.lifecycle:lifecycle-runtime-ktx:2.8.6")
     implementation("androidx.lifecycle:lifecycle-viewmodel-compose:2.8.6")
-
-    // Coroutines
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.9.0")
     implementation("androidx.compose.material:material-icons-core:1.6.8")
     implementation("androidx.compose.material:material-icons-extended:1.6.8")
     implementation("androidx.navigation:navigation-compose:2.7.7")
     implementation ("androidx.palette:palette:1.0.0")
-
-    // Firebase
-    //implementation(platform("com.google.firebase:firebase-bom:34.1.0"))
     implementation("com.google.firebase:firebase-analytics")
-
     implementation("androidx.compose.runtime:runtime-livedata:1.6.7")
-    //implementation("com.google.firebase:firebase-auth")
-    //implementation("com.google.firebase:firebase-firestore")
     implementation ("com.google.firebase:firebase-auth-ktx:22.1.1")
-
     implementation(libs.androidx.core.ktx)
-
     implementation(platform("com.google.firebase:firebase-bom:33.1.1")) // Latest stable BOM
     implementation("com.google.firebase:firebase-analytics")
     implementation("com.google.firebase:firebase-auth") // KTX is included by default

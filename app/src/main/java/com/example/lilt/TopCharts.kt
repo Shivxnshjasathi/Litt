@@ -129,7 +129,7 @@ class BillboardViewModel : ViewModel() {
 }
 
 
-// --- COMPOSABLE ---
+// --- COMPOSABLE UI ---
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -370,9 +370,9 @@ fun Modifier.shimmerEffect(): Modifier = composed {
     background(
         brush = Brush.linearGradient(
             colors = listOf(
-                Color(0xFF3A3A3A),
-                Color(0xFF505050),
-                Color(0xFF3A3A3A),
+                Color.White.copy(alpha = 0.3f),
+                Color.White.copy(alpha = 0.5f),
+                Color.White.copy(alpha = 0.3f),
             ),
             start = Offset(startOffsetX, 0f),
             end = Offset(startOffsetX + size.width, size.height)

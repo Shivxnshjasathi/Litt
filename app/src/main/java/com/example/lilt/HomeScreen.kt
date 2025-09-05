@@ -13,6 +13,7 @@ import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.animateContentSize
 import androidx.compose.animation.core.RepeatMode
+import androidx.compose.animation.core.animateDpAsState
 import androidx.compose.animation.core.animateFloat
 import androidx.compose.animation.core.infiniteRepeatable
 import androidx.compose.animation.core.rememberInfiniteTransition
@@ -62,6 +63,7 @@ import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Shuffle
 import androidx.compose.material.icons.filled.SkipNext
 import androidx.compose.material.icons.filled.SkipPrevious
+import androidx.compose.material.icons.outlined.FavoriteBorder
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.CircularProgressIndicator
@@ -115,11 +117,9 @@ import coil.compose.SubcomposeAsyncImage
 import coil.disk.DiskCache
 import coil.memory.MemoryCache
 import coil.request.ImageRequest
-import com.example.lilt.ui.theme.AppTypography
 import com.google.firebase.auth.FirebaseAuth
 import com.google.firebase.auth.ktx.auth
 import com.google.firebase.firestore.FirebaseFirestore
-import com.google.firebase.firestore.firestore
 import com.google.firebase.firestore.ktx.firestore
 import com.google.firebase.ktx.Firebase
 import com.jakewharton.retrofit2.converter.kotlinx.serialization.asConverterFactory
@@ -317,6 +317,7 @@ class PlayerController(private val app: Application) {
 
 // --- VIEW MODEL ---
 
+@UnstableApi
 class EnergyViewModel(app: Application) : AndroidViewModel(app) {
     private val repo = EnergyRepository(ApiClient.api)
     private val player = PlayerController(app)
@@ -357,6 +358,11 @@ class EnergyViewModel(app: Application) : AndroidViewModel(app) {
     private var progressUpdaterJob: Job? = null
     private var autoRefreshJob: Job? = null
 
+    // Favorite song state
+    var isCurrentSongFavorite by mutableStateOf(false)
+        private set
+    private var favoriteSongTitles by mutableStateOf<Set<String>>(emptySet())
+
     private val playerListener = object : Player.Listener {
         override fun onIsPlayingChanged(isPlaying: Boolean) {
             this@EnergyViewModel.isPlaying = isPlaying
@@ -369,10 +375,36 @@ class EnergyViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     init {
-        // User is expected to be authenticated via AuthScreen.
         player.exo.addListener(playerListener)
+        // Listen for auth state changes to fetch favorites
+        auth.addAuthStateListener { firebaseAuth ->
+            if (firebaseAuth.currentUser != null) {
+                fetchFavoriteSongs()
+            } else {
+                favoriteSongTitles = emptySet()
+            }
+        }
         fetchSongs()
         startAutoRefresh()
+    }
+
+    private fun fetchFavoriteSongs() {
+        val userId = auth.currentUser?.uid ?: return
+        viewModelScope.launch {
+            try {
+                val snapshot = db.collection("users").document(userId)
+                    .collection("saved_songs")
+                    .get()
+                    .await()
+                favoriteSongTitles = snapshot.documents.map { it.id }.toSet()
+                // Update favorite status if a song is already selected
+                selectedSong?.let {
+                    isCurrentSongFavorite = favoriteSongTitles.contains(it.title)
+                }
+            } catch (e: Exception) {
+                // Handle or log the error appropriately
+            }
+        }
     }
 
     fun fetchSongs(forceReload: Boolean = false) {
@@ -396,11 +428,21 @@ class EnergyViewModel(app: Application) : AndroidViewModel(app) {
             playPause()
         } else {
             selectedSong = song
+            isCurrentSongFavorite = favoriteSongTitles.contains(song.title)
             player.play(song.audioUrl)
         }
     }
 
-    fun saveSongToFavorites(song: Song) {
+    fun toggleFavoriteStatus() {
+        val song = selectedSong ?: return
+        if (isCurrentSongFavorite) {
+            removeSongFromFavorites(song)
+        } else {
+            saveSongToFavorites(song)
+        }
+    }
+
+    private fun saveSongToFavorites(song: Song) {
         val userId = auth.currentUser?.uid
         if (userId == null) {
             Toast.makeText(getApplication(), "You must be signed in to save songs.", Toast.LENGTH_SHORT).show()
@@ -409,17 +451,36 @@ class EnergyViewModel(app: Application) : AndroidViewModel(app) {
 
         viewModelScope.launch {
             try {
-                // Using the song title as the document ID to prevent duplicates
                 db.collection("users").document(userId)
                     .collection("saved_songs").document(song.title)
                     .set(song)
                     .await()
+                favoriteSongTitles = favoriteSongTitles + song.title
+                isCurrentSongFavorite = true
                 Toast.makeText(getApplication(), "Song saved!", Toast.LENGTH_SHORT).show()
             } catch (e: Exception) {
                 Toast.makeText(getApplication(), "Failed to save song: ${e.message}", Toast.LENGTH_LONG).show()
             }
         }
     }
+
+    private fun removeSongFromFavorites(song: Song) {
+        val userId = auth.currentUser?.uid ?: return
+        viewModelScope.launch {
+            try {
+                db.collection("users").document(userId)
+                    .collection("saved_songs").document(song.title)
+                    .delete()
+                    .await()
+                favoriteSongTitles = favoriteSongTitles - song.title
+                isCurrentSongFavorite = false
+                Toast.makeText(getApplication(), "Removed from favorites.", Toast.LENGTH_SHORT).show()
+            } catch (e: Exception) {
+                Toast.makeText(getApplication(), "Failed to remove song: ${e.message}", Toast.LENGTH_LONG).show()
+            }
+        }
+    }
+
 
     private fun fetchSongSummary(song: Song) {
         viewModelScope.launch {
@@ -484,7 +545,6 @@ class EnergyViewModel(app: Application) : AndroidViewModel(app) {
         showPlayer = false
     }
 
-    // OPTIMIZATION: Function to get dominant color, using the cache.
     suspend fun getDominantColorForSong(context: Context, imageUrl: String): Color? {
         if (dominantColorCache.containsKey(imageUrl)) {
             return dominantColorCache[imageUrl]
@@ -530,11 +590,11 @@ class EnergyViewModel(app: Application) : AndroidViewModel(app) {
 
 // --- ROOT COMPOSABLE ---
 
+@UnstableApi
 @Composable
 fun EnergyPlayerScreen(
     modifier: Modifier = Modifier,
-    navController: NavController,
-    authViewModel: AuthViewModel // Accept AuthViewModel to ensure context
+    navController: NavController
 ) {
     val context = LocalContext.current
     val vm: EnergyViewModel = remember {
@@ -542,6 +602,12 @@ fun EnergyPlayerScreen(
         ViewModelProvider.AndroidViewModelFactory.getInstance(app)
             .create(EnergyViewModel::class.java)
     }
+
+    // Animate the bottom padding for the FAB based on mini-player visibility
+    val fabPaddingBottom by animateDpAsState(
+        targetValue = if (vm.selectedSong != null) 96.dp else 16.dp,
+        label = "fab_padding"
+    )
 
     BackHandler(enabled = vm.showPlayer) { vm.closePlayer() }
 
@@ -567,7 +633,7 @@ fun EnergyPlayerScreen(
                 exit = scaleOut(),
                 modifier = Modifier
                     .align(Alignment.BottomEnd)
-                    .padding(16.dp)
+                    .padding(end = 16.dp, bottom = fabPaddingBottom) // Apply animated padding
             ) {
                 FloatingActionButton(
                     onClick = { vm.fetchSongs(forceReload = true) },
@@ -602,7 +668,6 @@ fun EnergyPlayerScreen(
                 }
             }
 
-            // Show Summary Dialog when requested
             AnimatedVisibility(visible = vm.showSummaryDialog) {
                 SongSummaryDialog(
                     song = vm.songForSummary,
@@ -628,7 +693,8 @@ fun EnergyPlayerScreen(
                         onSeek = vm::onSeek,
                         onSkipPrevious = vm::skipPrevious,
                         onSkipNext = vm::skipNext,
-                        onSaveSong = { vm.saveSongToFavorites(song) },
+                        isFavorite = vm.isCurrentSongFavorite,
+                        onToggleFavorite = vm::toggleFavoriteStatus,
                         getDominantColor = { vm.getDominantColorForSong(context, song.imageUrl) }
                     )
                 }
@@ -662,7 +728,7 @@ fun SongListWithCollapsingToolbar(
             item(key = "header_picked_for_you", contentType = "header") {
                 Text(
                     text = "Picked For You",
-                    style = AppTypography.bodyLarge,
+                    style = MaterialTheme.typography.bodyLarge,
                     fontWeight = FontWeight.Bold,
                     color = MaterialTheme.colorScheme.secondary,
                     modifier = Modifier.padding(16.dp)
@@ -682,7 +748,7 @@ fun SongListWithCollapsingToolbar(
                 Spacer(Modifier.height(24.dp))
                 Text(
                     text = "Popular Suggestions",
-                    style = AppTypography.bodyLarge,
+                    style = MaterialTheme.typography.bodyLarge,
                     fontWeight = FontWeight.Bold,
                     color = MaterialTheme.colorScheme.secondary,
                     modifier = Modifier.padding(horizontal = 16.dp)
@@ -692,7 +758,7 @@ fun SongListWithCollapsingToolbar(
 
             itemsIndexed(
                 items = popularSongs,
-                key = { _, song -> song.audioUrl },
+                key = { index, song -> "${song.audioUrl}-$index" },
                 contentType = { _, _ -> "song_item" }
             ) { index, song ->
                 AnimatedVisibility(
@@ -1190,13 +1256,13 @@ fun FullScreenPlayer(
     onSeek: (Float) -> Unit,
     onSkipPrevious: () -> Unit,
     onSkipNext: () -> Unit,
-    onSaveSong: () -> Unit,
-    getDominantColor: suspend () -> Color? // Pass the function
+    isFavorite: Boolean,
+    onToggleFavorite: () -> Unit,
+    getDominantColor: suspend () -> Color?
 ) {
     var offsetY by remember { mutableFloatStateOf(0f) }
     var dominantColor by remember { mutableStateOf<Color?>(null) }
 
-    // Effect will re-launch when the song's imageUrl changes
     LaunchedEffect(song.imageUrl) {
         dominantColor = getDominantColor()
     }
@@ -1308,7 +1374,7 @@ fun FullScreenPlayer(
                         try {
                             context.startActivity(intent)
                         } catch (e: Exception) {
-                            // Handle case where no browser is available, though unlikely.
+                            // Handle case where no browser is available
                         }
                     },
                     shape = CircleShape,
@@ -1316,7 +1382,7 @@ fun FullScreenPlayer(
                     border = BorderStroke(1.dp, TextSecondary)
                 ) {
                     Icon(
-                        imageVector = Icons.Default.PlayArrow, // A generic play icon
+                        imageVector = Icons.Default.PlayArrow,
                         contentDescription = "YouTube",
                         modifier = Modifier.size(18.dp)
                     )
@@ -1324,7 +1390,6 @@ fun FullScreenPlayer(
                     Text("Listen on YouTube")
                 }
 
-                // Spacer to push controls to the bottom
                 Spacer(Modifier.weight(1f))
 
                 Slider(
@@ -1379,16 +1444,24 @@ fun FullScreenPlayer(
                     IconButton(onClick = onSkipNext) {
                         Icon(Icons.Default.SkipNext, contentDescription = "Next", tint = MaterialTheme.colorScheme.secondary, modifier = Modifier.size(40.dp))
                     }
-                    IconButton(onClick = onSaveSong) {
-                        Icon(Icons.Default.Favorite, contentDescription = "Save Song", tint = MaterialTheme.colorScheme.secondary)
+                    IconButton(onClick = onToggleFavorite) {
+                        AnimatedContent(
+                            targetState = isFavorite,
+                            transitionSpec = { scaleIn() togetherWith scaleOut() },
+                            label = "FavoriteIconAnimation"
+                        ) { isFav ->
+                            if (isFav) {
+                                Icon(Icons.Default.Favorite, contentDescription = "Remove from Favorites", tint = MaterialTheme.colorScheme.primary)
+                            } else {
+                                Icon(Icons.Outlined.FavoriteBorder, contentDescription = "Save Song", tint = MaterialTheme.colorScheme.secondary)
+                            }
+                        }
                     }
                 }
             }
         }
     }
 }
-
-
 
 private fun formatTime(ms: Long): String {
     val totalSeconds = ms / 1000
@@ -1403,7 +1476,6 @@ suspend fun getDominantColor(context: Context, imageUrl: String): Color? {
             .data(imageUrl)
             .allowHardware(false) // Important for Palette
             .build()
-        // Use the singleton ImageLoader from Coil
         val drawable = Coil.imageLoader(context).execute(request).drawable
         val bitmap = (drawable as? BitmapDrawable)?.bitmap ?: return null
         withContext(Dispatchers.Default) {
@@ -1415,6 +1487,6 @@ suspend fun getDominantColor(context: Context, imageUrl: String): Color? {
             if (colorInt != 0) Color(colorInt) else null
         }
     } catch (e: Exception) {
-        null // Return null on any error
+        null
     }
 }

@@ -1,14 +1,20 @@
+@file:kotlin.OptIn(ExperimentalFoundationApi::class)
+
 package com.example.lilt
 
 import android.R
 import android.content.Intent
 import android.net.Uri
+import androidx.annotation.OptIn
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.scaleIn
+import androidx.compose.animation.scaleOut
+import androidx.compose.animation.slideInVertically
+import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -64,6 +70,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewmodel.compose.viewModel
+import androidx.media3.common.util.UnstableApi
 import androidx.navigation.NavController
 import androidx.navigation.NavDestination.Companion.hierarchy
 import androidx.navigation.NavGraph.Companion.findStartDestination
@@ -158,6 +165,7 @@ fun MainScreen() {
 }
 
 // Navigation graph for the screens accessible from the bottom bar
+@OptIn(UnstableApi::class)
 @Composable
 fun BottomNavGraph(
     navController: NavController,
@@ -170,7 +178,7 @@ fun BottomNavGraph(
         modifier = Modifier.padding(paddingValues)
     ) {
         composable(BottomNavItem.Home.route) {
-            EnergyPlayerScreen(navController = navController, authViewModel = authViewModel)
+            EnergyPlayerScreen(navController = navController,)
         }
         composable(BottomNavItem.Saved.route) { SavedSongsScreen() }
         composable(BottomNavItem.Profile.route) { TopCharts() }
@@ -232,6 +240,7 @@ class SavedSongsViewModel : ViewModel() {
     }
 }
 
+@OptIn(UnstableApi::class, ExperimentalFoundationApi::class, ExperimentalFoundationApi::class)
 @Composable
 fun SavedSongsScreen(savedSongsViewModel: SavedSongsViewModel = viewModel()) {
     val savedSongs by savedSongsViewModel.savedSongs.collectAsState()
@@ -245,15 +254,24 @@ fun SavedSongsScreen(savedSongsViewModel: SavedSongsViewModel = viewModel()) {
             modifier = Modifier.fillMaxSize(),
             containerColor = Color.Transparent, // Keep background gradient visible
             floatingActionButton = {
-                FloatingActionButton(
-                    onClick = { savedSongsViewModel.fetchSavedSongs() },
-                    containerColor = MaterialTheme.colorScheme.primary
+                AnimatedVisibility(
+                    visible = !energyViewModel.showPlayer,
+                    enter = scaleIn() + fadeIn(),
+                    exit = scaleOut() + fadeOut()
                 ) {
-                    Icon(
-                        imageVector = Icons.Filled.Refresh,
-                        contentDescription = "Reload Songs",
-                        tint = MaterialTheme.colorScheme.onPrimary
-                    )
+                    val fabBottomPadding = if (energyViewModel.selectedSong != null) 80.dp else 0.dp
+                    Box(modifier = Modifier.padding(bottom = fabBottomPadding)) {
+                        FloatingActionButton(
+                            onClick = { savedSongsViewModel.fetchSavedSongs() },
+                            containerColor = MaterialTheme.colorScheme.primary
+                        ) {
+                            Icon(
+                                imageVector = Icons.Filled.Refresh,
+                                contentDescription = "Reload Songs",
+                                tint = MaterialTheme.colorScheme.onPrimary
+                            )
+                        }
+                    }
                 }
             }
         ) { innerPadding ->
@@ -272,24 +290,38 @@ fun SavedSongsScreen(savedSongsViewModel: SavedSongsViewModel = viewModel()) {
                 if (isLoading) {
                     CircularProgressIndicator(modifier = Modifier.align(Alignment.Center))
                 } else if (savedSongs.isEmpty()) {
-                    Column(
-                        modifier = Modifier.align(Alignment.Center),
-                        horizontalAlignment = Alignment.CenterHorizontally,
-                        verticalArrangement = Arrangement.Center
-                    ) {
-                        Icon(
-                            imageVector = Icons.Filled.Favorite,
-                            contentDescription = "No Saved Songs",
-                            modifier = Modifier.size(100.dp),
+                    // Animate the empty state content
+                    var emptyStateVisible by remember { mutableStateOf(false) }
+                    LaunchedEffect(Unit) {
+                        emptyStateVisible = true
+                    }
 
-                            tint = MaterialTheme.colorScheme.primary.copy(alpha = 0.5f)
-                        )
-                        Spacer(modifier = Modifier.padding(8.dp))
-                        Text(
-                            text = "No Saved Songs",
-                            style = MaterialTheme.typography.headlineSmall,
-                            color = MaterialTheme.colorScheme.secondary
-                        )
+                    AnimatedVisibility(
+                        visible = emptyStateVisible,
+                        enter = fadeIn(animationSpec = tween(durationMillis = 500, delayMillis = 200)) +
+                                slideInVertically(
+                                    initialOffsetY = { it / 5 },
+                                    animationSpec = tween(durationMillis = 500, delayMillis = 200)
+                                ),
+                        modifier = Modifier.align(Alignment.Center)
+                    ) {
+                        Column(
+                            horizontalAlignment = Alignment.CenterHorizontally,
+                            verticalArrangement = Arrangement.Center
+                        ) {
+                            Icon(
+                                imageVector = Icons.Filled.Favorite,
+                                contentDescription = "No Saved Songs",
+                                modifier = Modifier.size(100.dp),
+                                tint = MaterialTheme.colorScheme.primary.copy(alpha = 0.5f)
+                            )
+                            Spacer(modifier = Modifier.padding(8.dp))
+                            Text(
+                                text = "No Saved Songs",
+                                style = MaterialTheme.typography.headlineSmall,
+                                color = MaterialTheme.colorScheme.secondary
+                            )
+                        }
                     }
                 } else {
                     LazyColumn(
@@ -307,7 +339,7 @@ fun SavedSongsScreen(savedSongsViewModel: SavedSongsViewModel = viewModel()) {
                                 modifier = Modifier.padding(horizontal = 16.dp, vertical = 16.dp)
                             )
                         }
-                        items(savedSongs) { song ->
+                        items(savedSongs, key = { it.hashCode() }) { song -> // Provide a key for better animation performance
                             SongRow(
                                 song = song,
                                 onSongClick = { energyViewModel.onSongClick(song) },
@@ -318,7 +350,11 @@ fun SavedSongsScreen(savedSongsViewModel: SavedSongsViewModel = viewModel()) {
                                     )
                                     context.startActivity(intent)
                                 },
-                                modifier = Modifier.padding(horizontal = 16.dp)
+                                modifier = Modifier
+                                    .padding(horizontal = 16.dp)
+                                    .animateItemPlacement(
+                                        animationSpec = tween(durationMillis = 500)
+                                    )
                             )
                         }
                     }
@@ -353,18 +389,13 @@ fun SavedSongsScreen(savedSongsViewModel: SavedSongsViewModel = viewModel()) {
                         onSeek = { energyViewModel.onSeek(it) },
                         onSkipPrevious = { energyViewModel.skipPrevious() },
                         onSkipNext = { energyViewModel.skipNext() },
-                        onSaveSong = { energyViewModel.saveSongToFavorites(energyViewModel.selectedSong!!) },
-                        getDominantColor = {
-                            energyViewModel.getDominantColorForSong(
-                                context,
-                                energyViewModel.selectedSong!!.imageUrl
-                            )
-                        }
+                        isFavorite = energyViewModel.isCurrentSongFavorite,
+                        onToggleFavorite = energyViewModel::toggleFavoriteStatus,
+                        getDominantColor = { energyViewModel.getDominantColorForSong(context, energyViewModel.selectedSong!!.imageUrl)}
                     )
                 }
             }
         }
     }
 }
-
 
