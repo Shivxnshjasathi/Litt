@@ -19,9 +19,6 @@
     public *;
 }
 
-# Keep the @Composable annotation and its properties.
--keep @androidx.compose.runtime.Composable <methods>;
-
 # Keep classes that are annotated with @Stable or @Immutable
 -keepclassmembers class * {
     @androidx.compose.runtime.Stable <fields>;
@@ -47,6 +44,7 @@
 }
 
 # Keep serialization classes if you are using Kotlinx Serialization
--keepclasseswithmembers 'public class * { @kotlinx.serialization.Serializable *; }'
--keepclassmembers 'class * { @kotlinx.serialization.Serializable *; }'
--keepclassmembers 'class **.$serializer { *; }'
+-keepclasseswithmembers public class * { @kotlinx.serialization.Serializable *; }
+-keepclassmembers class * { @kotlinx.serialization.Serializable *; }
+-keepclassmembers class **.$serializer { *; }
+
